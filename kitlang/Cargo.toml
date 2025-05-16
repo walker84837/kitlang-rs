@@ -1,0 +1,10 @@
+[package]
+name = "kitlang"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+logos = "0.15.0"
+pest = "2.8.0"
+pest_derive = "2.8.0"
+thiserror = "2.0.12"

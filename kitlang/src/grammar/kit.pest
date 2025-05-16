@@ -1,0 +1,42 @@
+WHITESPACE = _{ " " | "\t" | NEWLINE }
+NEWLINE = _{ "\n" | "\r\n" }
+
+comment = _{ line_comment | block_comment }
+line_comment = { "//" ~ (!NEWLINE ~ ANY)* }
+block_comment = { "/*" ~ (!"*/" ~ ANY)* ~ "*/" }
+
+string = { multiline_string | singleline_string }
+singleline_string = { "\"" ~ ( "\\\"" | !"\"" ~ ANY )* ~ "\"" }
+multiline_string = { "\"\"\"" ~ (!"\"\"\"" ~ ANY)* ~ "\"\"\"" }
+
+character = { "c'" ~ ANY ~ "'" }
+
+boolean = { "true" | "false" }
+
+constant = { "null" | "empty" | "this" | "Self" | "Some" | "None" | "Cons" | "Empty" }
+
+conditional = { "if" | "then" | "else" | "match" }
+repeat = { "for" | "do" | "while" }
+label = { "default" }
+operator = { "sizeof" }
+keyword = { "function" | "trait" | "implement" | "return" | "as" | "break" | "defer" }
+exception = { "throw" }
+include = { "include" | "import" }
+macro = { "rules" | "using" | "rule" | "implicit" }
+storage_class = { "public" | "static" | "var" | "const" }
+structure = { "struct" | "union" | "enum" | "abstract" }
+typedef = { "typedef" | "specialize" }
+
+type = {
+    "Int8" | "Int16" | "Short" | "Int32" | "Int64" | "Long" |
+    "Uint8" | "Byte" | "Uint16" | "Uint32" | "Uint64" |
+    "Float32" | "Float" | "Float64" | "Double" |
+    "Void" | "Bool" | "Char" | "Int" | "Size" | "Ptr" |
+    "Numeric" | "Integral" | "NumericMixed" |
+    "List" | "CArray" | "CString" | "Box" |
+    "Iterable" | "Iterator" | "Option" |
+    "Allocator" | "LinearAllocator" | "StackAllocator" |
+    "Path"
+}
+
+identifier = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")* }
