@@ -1,9 +1,10 @@
 WHITESPACE = _{ " " | "\t" | NEWLINE }
 NEWLINE = _{ "\n" | "\r\n" }
 
-program = _{ SOI ~ (import | function)* ~ EOI }
+program = _{ SOI ~ (import | include | function)* ~ EOI }
 
 import = { "import" ~ path ~ ";" }
+include = { "include" ~ string ~ ";" }
 path = @{ identifier ~ ("." ~ identifier)* ~ ("." ~ ("*" | "**"))? }
 
 function = {
@@ -39,17 +40,18 @@ additive = { multiplicative ~ (("+" | "-") ~ multiplicative)* }
 multiplicative = { unary ~ (("*" | "/" | "%") ~ unary)* }
 unary = { ("!" | "-" | "&" | "*")* ~ primary }
 primary = {
+    function_call |
     identifier |
     literal |
     "(" ~ expr ~ ")" |
-    string |
-    function_call
+    string
 }
 
 function_call = { identifier ~ "(" ~ (expr ~ ("," ~ expr)*)? ~ ")" }
 
 literal = { number | boolean | "null" }
-number = @{ ("-"? ~ ASCII_DIGIT+) }
+float = @{ ("-"? ~ ASCII_DIGIT+ ~ "." ~ ASCII_DIGIT+) }
+number = @{ ("-"? ~ ASCII_DIGIT+ ~ ("." ~ ASCII_DIGIT+)? ) }
 boolean = { "true" | "false" }
 
 string = @{ "\"" ~ ( "\\\"" | !"\"" ~ ANY )* ~ "\"" }

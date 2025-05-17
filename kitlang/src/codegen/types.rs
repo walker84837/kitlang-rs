@@ -8,6 +8,11 @@ pub enum Type {
 }
 
 #[derive(Debug)]
+pub struct Include {
+    pub path: String,
+}
+
+#[derive(Debug)]
 pub struct Function {
     pub name: String,
     pub params: Vec<Param>,
@@ -31,7 +36,7 @@ pub enum Stmt {
     VarDecl {
         name: String,
         ty: Option<Type>,
-        init: Expr,
+        init: Option<Expr>,
     },
     Expr(Expr),
     Return(Option<Expr>),
@@ -50,4 +55,13 @@ pub enum Literal {
     Float(f64),
     String(String),
     Bool(bool),
+    Null,
+}
+
+/// A parsed Kit program
+#[derive(Debug)]
+pub struct Program {
+    pub includes: Vec<Include>,
+    pub imports: Vec<String>,
+    pub functions: Vec<Function>,
 }

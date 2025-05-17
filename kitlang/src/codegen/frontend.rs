@@ -1,7 +1,7 @@
-use crate::KitParser;
-use crate::Rule;
 use crate::codegen::types::*;
+use crate::{KitParser, Rule};
 use pest::Parser;
+use pest::iterators::Pair;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -15,6 +15,7 @@ pub struct Compiler {
     pub files: Vec<PathBuf>,
     pub output: PathBuf,
     pub opt_level: Option<Optimizations>,
+    includes: Vec<Include>,
     verbose_messages: bool,
 }
 
@@ -28,37 +29,239 @@ impl Compiler {
             files,
             output: output.as_ref().to_path_buf(),
             verbose_messages: false,
+            includes: Vec::new(),
             opt_level,
         }
     }
 
-    fn parse(&self) -> Vec<Function> {
+    fn parse(&mut self) -> Vec<Function> {
+        let mut includes = Vec::new();
         let mut functions = Vec::new();
         for file in &self.files {
             let input = std::fs::read_to_string(file).expect("Failed to read file");
-            let pairs = KitParser::parse(Rule::program, &input).expect("Parse failed");
-            // TODO: process pairs into functions
-            println!("{:#?}", pairs);
+            let mut pairs = KitParser::parse(Rule::program, &input)
+                .expect("Parse failed")
+                .into_iter();
+            while let Some(pair) = pairs.next() {
+                match pair.as_rule() {
+                    Rule::include => includes.push(self.parse_include(pair)),
+                    Rule::function => functions.push(self.parse_function(pair)),
+                    _ => {}
+                }
+            }
         }
+        // store includes/imports somewhere or return a richer AST
+        // for now, stash in a field or return a Program struct
+        // e.g. Program { includes, imports, functions }
+        // but to keep minimal, we might store them on the Compiler
+        self.includes = includes;
         functions
     }
 
-    fn optimize(&self) {
-        todo!()
+    fn parse_include(&self, pair: Pair<Rule>) -> Include {
+        // include = { "include" ~ string ~ ";" }
+        let mut inner = pair.into_inner();
+        let lit = inner.next().unwrap().as_str();
+        // lit includes the quotes, so strip them:
+        let path = lit[1..lit.len() - 1].to_string();
+        Include { path }
     }
 
-    fn transpile(&self) {
+    fn parse_function(&self, pair: Pair<Rule>) -> Function {
+        let mut inner = pair.into_inner();
+
+        // Consume "function" keyword
+        let _ = inner.next().expect("function keyword");
+
+        // Function name
+        let name = inner.next().unwrap().as_str().to_string();
+
+        // Consume opening '('
+        let _ = inner.next().expect("opening parenthesis");
+
+        // Parse parameters if present
+        let params = inner
+            .next()
+            .filter(|p| p.as_rule() == Rule::params)
+            .map(|p| self.parse_params(p))
+            .unwrap_or_default();
+
+        // Consume closing ')'
+        let _ = inner.next().expect("closing parenthesis");
+
+        // Parse optional return type
+        let return_type = inner
+            .next()
+            .filter(|p| p.as_rule() == Rule::type_annotation)
+            .map(|p| self.parse_type(p));
+
+        // Parse function body
+        let body = self.parse_block(inner.next().expect("function body block"));
+
+        Function {
+            name,
+            params,
+            return_type,
+            body,
+        }
+    }
+
+    fn parse_params(&self, pair: Pair<Rule>) -> Vec<Param> {
+        // param_list = { param ~ ("," ~ param )* }
+        pair.into_inner()
+            .filter(|p| p.as_rule() == Rule::param)
+            .map(|p| {
+                let mut inner = p.into_inner();
+                let name = inner.next().unwrap().as_str().to_string();
+                let ty = inner.next().unwrap().as_str().to_string();
+                Param {
+                    name,
+                    ty: Type::Named(ty),
+                }
+            })
+            .collect()
+    }
+
+    fn parse_block(&self, pair: Pair<Rule>) -> Block {
+        // block = { "{" ~ stmt* ~ "}" }
+        let stmts = pair
+            .into_inner()
+            .filter_map(|p| match p.as_rule() {
+                Rule::var_decl => Some(self.parse_var_decl(p)),
+                Rule::expr_stmt => Some(self.parse_expr_stmt(p)),
+                Rule::return_stmt => Some(self.parse_return(p)),
+                _ => None,
+            })
+            .collect();
+        Block { stmts }
+    }
+
+    fn parse_var_decl(&self, pair: Pair<Rule>) -> Stmt {
+        // var_decl = { ("var"|"const") ~ ident ~ (":" ~ type_annotation)? ~ ("=" ~ expr)? ~ ";" }
+        let mut inner = pair.into_inner();
+        let _kw = inner.next().unwrap(); // var
+        let name = inner.next().unwrap().as_str().to_string();
+        let next = inner.next().unwrap();
+        // maybe has explicit type
+        let (ty, after_ty) = if next.as_rule() == Rule::type_annotation {
+            (Some(self.parse_type(next)), inner.next().unwrap())
+        } else {
+            (None, next)
+        };
+
+        // maybe initializer
+        let init = if after_ty.as_rule() == Rule::expr {
+            Some(self.parse_expr(after_ty))
+        } else {
+            None
+        };
+
+        Stmt::VarDecl { name, ty, init }
+    }
+
+    fn parse_type(&self, pair: Pair<Rule>) -> Type {
+        // pair.as_str() gives e.g. "int" or "Foo[Bar]"
+        let mut inner = pair.into_inner();
+        let base = inner.next().unwrap().as_str().to_string();
+        let mut ty = Type::Named(base);
+        // if there are array or pointer annotations, handle here…
+        for sub in inner {
+            // you can extend to multi-dimensional or pointer types
+            let inner_ty = self.parse_type(sub);
+            ty = Type::Ptr(Box::new(inner_ty));
+        }
+        ty
+    }
+
+    fn optimize(&self) {
+        // TODO: implement real optimizations
+        if let Some(Optimizations::Simple) = self.opt_level {
+            eprintln!("Simple optimization: (none implemented)");
+        }
+    }
+
+    fn transpile(&mut self) {
         let functions = self.parse();
         let c_code = self.generate_c_code(functions);
         std::fs::write(&self.output, c_code).expect("Failed to write output");
     }
 
+    fn parse_expr_stmt(&self, pair: Pair<Rule>) -> Stmt {
+        // expr_stmt = { expr ~ ";" }
+        let expr_pair = pair.into_inner().next().unwrap();
+        Stmt::Expr(self.parse_expr(expr_pair))
+    }
+
+    fn parse_return(&self, pair: Pair<Rule>) -> Stmt {
+        // return_stmt = { "return" ~ expr? ~ ";" }
+        let mut inner = pair.into_inner();
+        let expr = inner.next().map(|p| self.parse_expr(p));
+        Stmt::Return(expr)
+    }
+
+    fn parse_expr(&self, pair: Pair<Rule>) -> Expr {
+        match pair.as_rule() {
+            Rule::identifier => Expr::Identifier(pair.as_str().to_string()),
+            Rule::literal => {
+                let s = pair.as_str();
+                match s {
+                    "true" => Expr::Literal(Literal::Bool(true)),
+                    "false" => Expr::Literal(Literal::Bool(false)),
+                    "null" => Expr::Literal(Literal::Null),
+                    _ => {
+                        let i = s
+                            .parse::<i64>()
+                            .expect("number literal should parse as i64");
+                        Expr::Literal(Literal::Int(i))
+                    }
+                }
+            }
+            Rule::float => Expr::Literal(Literal::Float(pair.as_str().parse().unwrap())),
+            // TODO: string literal
+            Rule::string => {
+                let full = pair.as_str();
+                let inner = &full[1..full.len() - 1];
+                Expr::Literal(Literal::String(inner.to_string()))
+            }
+            Rule::function_call => {
+                let mut inner = pair.into_inner();
+                let callee = inner.next().unwrap().as_str().to_string();
+                let args = inner
+                    .filter(|p| p.as_rule() == Rule::expr)
+                    .map(|p| self.parse_expr(p))
+                    .collect();
+                Expr::Call { callee, args }
+            }
+            Rule::primary => {
+                let inner = pair.into_inner().next().unwrap();
+                self.parse_expr(inner)
+            }
+            _ => panic!("Unexpected expr rule: {:?}", pair.as_rule()),
+        }
+    }
+
     fn generate_c_code(&self, functions: Vec<Function>) -> String {
-        let mut c_code = String::from("#include <stdio.h>\n\n");
+        let mut c_code = String::new();
+        for inc in &self.includes {
+            let line = if inc.path.ends_with(".h") {
+                if inc.path.starts_with('<') {
+                    format!("#include {}\n", inc.path)
+                } else {
+                    format!("#include \"{}\"\n", inc.path)
+                }
+            } else {
+                // fallback
+                format!("#include \"{}\"\n", inc.path)
+            };
+            c_code.push_str(&line);
+        }
+        c_code.push_str("\n");
+
         for func in functions {
             c_code.push_str(&self.transpile_function(&func));
             c_code.push_str("\n\n");
         }
+
         c_code
     }
 
@@ -92,8 +295,15 @@ impl Compiler {
                     let ty_str = ty
                         .as_ref()
                         .map_or("auto".to_string(), |t| self.transpile_type(t));
-                    let init_str = self.transpile_expr(init);
-                    code.push_str(&format!("{} {} = {};\n", ty_str, name, init_str));
+                    match init {
+                        Some(expr) => {
+                            let init_str = self.transpile_expr(expr);
+                            code.push_str(&format!("{} {} = {};\n", ty_str, name, init_str));
+                        }
+                        None => {
+                            code.push_str(&format!("{} {};\n", ty_str, name));
+                        }
+                    }
                 }
                 Stmt::Expr(expr) => {
                     code.push_str(&self.transpile_expr(expr));
@@ -118,6 +328,7 @@ impl Compiler {
                 Literal::Float(f) => f.to_string(),
                 Literal::String(s) => format!("\"{}\"", s),
                 Literal::Bool(b) => b.to_string(),
+                Literal::Null => "NULL".to_string(),
             },
             Expr::Call { callee, args } => {
                 let args_str = args
@@ -140,17 +351,30 @@ impl Compiler {
         }
     }
 
-    pub fn compile(&self) {
+    pub fn compile(&mut self) {
         self.parse();
         self.optimize();
         self.transpile();
 
-        // TODO: compile generated C code with system compiler
-        let output_name = self.output.file_stem().unwrap().to_str().unwrap();
+        let out_c = if self.output.extension().unwrap_or_default() == "c" {
+            self.output.clone()
+        } else {
+            // ensure .c extension
+            self.output.with_extension("c")
+        };
+
+        let exe_name = self
+            .output
+            .file_stem()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
+
         let status = Command::new("gcc")
+            .arg(&out_c)
             .arg("-o")
-            .arg(output_name)
-            .arg(&self.output)
+            .arg(&exe_name)
             .status()
             .expect("Failed to run gcc");
 

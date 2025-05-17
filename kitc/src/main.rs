@@ -1,9 +1,8 @@
 use clap::{Parser, Subcommand};
-use kitlang::codegen::frontend;
-use kitlang::lexer::Token;
-use kitlang::logos::{Lexer, Logos};
+use kitlang::codegen::frontend::Compiler;
 use std::fs;
 use std::path::PathBuf;
+use std::process::Command;
 
 #[derive(Parser)]
 #[command(name = "kitc", version, about = "kit compiler")]
@@ -14,11 +13,15 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Just compile to C and object
     Compile {
+        /// the `.kit` source file
         #[arg(short, long)]
         path: PathBuf,
     },
+    /// Compile then run the resulting executable
     Run {
+        /// the `.kit` source file
         #[arg(short, long)]
         path: PathBuf,
     },
@@ -28,23 +31,39 @@ fn main() {
     let args = Cli::parse();
 
     match args.command {
-        Commands::Run { path } => {
-            compile_program(path);
-            // run code
-        }
         Commands::Compile { path } => {
-            compile_program(path);
-            println!("code compiled");
+            compile_and_maybe_run(&path, false);
+            println!("→ Successfully compiled!");
+        }
+        Commands::Run { path } => {
+            compile_and_maybe_run(&path, true);
         }
     }
 }
 
-fn compile_program(source: PathBuf) {
-    let source = fs::read_to_string(source).expect("Failed to read source file");
+fn compile_and_maybe_run(source: &PathBuf, run: bool) {
+    let _ = fs::read_to_string(source).unwrap_or_else(|_| panic!("couldn’t read {:?}", source));
 
-    let mut lexer: Lexer<Token> = Token::lexer(&source);
+    // derive the C-file name: e.g. foo.kit → foo.c
+    let c_file = source.with_extension("c");
 
-    let tokens = lexer.spanned().collect::<Vec<_>>();
-    let program = frontend::Compiler::new(vec![source.into()], "output", None);
-    program.compile();
+    let mut compiler = Compiler::new(vec![source.clone()], &c_file, None);
+
+    compiler.compile();
+
+    if run {
+        let exe = c_file
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .expect("invalid filename")
+            .to_string();
+
+        let status = Command::new(format!("./{}", exe))
+            .status()
+            .expect("failed to launch executable");
+
+        if !status.success() {
+            std::process::exit(status.code().unwrap_or(1));
+        }
+    }
 }
