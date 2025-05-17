@@ -5,4 +5,6 @@ pub mod typechecking;
 
 pub use logos;
 
-use pest_derive::Parser;
+#[derive(pest_derive::Parser)]
+#[grammar = "grammar/kit.pest"]
+pub struct KitParser;

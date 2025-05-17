@@ -1,60 +1,57 @@
 WHITESPACE = _{ " " | "\t" | NEWLINE }
 NEWLINE = _{ "\n" | "\r\n" }
 
-comment = _{ line_comment | block_comment }
-line_comment = { "//" ~ (!NEWLINE ~ ANY)* }
-block_comment = { "/*" ~ (!"*/" ~ ANY)* ~ "*/" }
+program = _{ SOI ~ (import | function)* ~ EOI }
 
-string = { multiline_string | singleline_string }
-singleline_string = { "\"" ~ ( "\\\"" | !"\"" ~ ANY )* ~ "\"" }
-multiline_string = { "\"\"\"" ~ (!"\"\"\"" ~ ANY)* ~ "\"\"\"" }
-
-character = { "c'" ~ ANY ~ "'" }
-
-boolean = { "true" | "false" }
-
-constant = { "null" | "empty" | "this" | "Self" | "Some" | "None" | "Cons" | "Empty" }
-
-conditional = { "if" | "then" | "else" | "match" }
-repeat = { "for" | "do" | "while" }
-label = { "default" }
-operator = { "sizeof" }
-keyword = { "function" | "main" | "trait" | "implement" | "return" | "as" | "break" | "defer" }
-exception = { "throw" }
-include = { "include" | "import" }
-macro = { "rules" | "using" | "rule" | "implicit" }
-storage_class = { "public" | "static" | "var" | "const" }
-structure = { "struct" | "union" | "enum" | "abstract" }
-typedef = { "typedef" | "specialize" }
-
-type = {
-    "Int8" | "Int16" | "Short" | "Int32" | "Int64" | "Long" |
-    "Uint8" | "Byte" | "Uint16" | "Uint32" | "Uint64" |
-    "Float32" | "Float" | "Float64" | "Double" |
-    "Void" | "Bool" | "Char" | "Int" | "Size" | "Ptr" |
-    "Numeric" | "Integral" | "NumericMixed" |
-    "List" | "CArray" | "CString" | "Box" |
-    "Iterable" | "Iterator" | "Option" |
-    "Allocator" | "LinearAllocator" | "StackAllocator" |
-    "Path"
-}
-
-identifier = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")* }
-
-program = _{ SOI ~ (function)* ~ EOI }
+import = { "import" ~ path ~ ";" }
+path = @{ identifier ~ ("." ~ identifier)* ~ ("." ~ ("*" | "**"))? }
 
 function = {
-    "function" ~ "main" ~ "(" ~ ")" ~ block
+    "function" ~ identifier ~ "(" ~ params? ~ ")" ~ (":" ~ type_annotation)? ~ block
 }
 
-block = {
-    "{" ~ (statement)* ~ "}"
-}
+params = { param ~ ("," ~ param)* }
+param = { identifier ~ ":" ~ type_annotation }
+
+type_annotation = { identifier ~ ("[" ~ type_annotation ~ ("," ~ type_annotation)* ~ "]")? }
+
+block = { "{" ~ (statement)* ~ "}" }
 
 statement = {
-    (printf_statement) ~ ";"
+    var_decl |
+    expr_stmt |
+    return_stmt
 }
 
-printf_statement = {
-    "printf" ~ "(" ~ string ~ "," ~ string ~ ")"
+var_decl = { ("var" | "const") ~ identifier ~ (":" ~ type_annotation)? ~ ("=" ~ expr)? ~ ";" }
+
+expr_stmt = { expr ~ ";" }
+
+return_stmt = { "return" ~ expr? ~ ";" }
+
+expr = { assign }
+assign = { logical_or ~ ("=" ~ assign)? }
+logical_or = { logical_and ~ ("||" ~ logical_and)* }
+logical_and = { equality ~ ("&&" ~ equality)* }
+equality = { comparison ~ (("==" | "!=") ~ comparison)* }
+comparison = { additive ~ (("<" | ">" | "<=" | ">=") ~ additive)* }
+additive = { multiplicative ~ (("+" | "-") ~ multiplicative)* }
+multiplicative = { unary ~ (("*" | "/" | "%") ~ unary)* }
+unary = { ("!" | "-" | "&" | "*")* ~ primary }
+primary = {
+    identifier |
+    literal |
+    "(" ~ expr ~ ")" |
+    string |
+    function_call
 }
+
+function_call = { identifier ~ "(" ~ (expr ~ ("," ~ expr)*)? ~ ")" }
+
+literal = { number | boolean | "null" }
+number = @{ ("-"? ~ ASCII_DIGIT+) }
+boolean = { "true" | "false" }
+
+string = @{ "\"" ~ ( "\\\"" | !"\"" ~ ANY )* ~ "\"" }
+
+identifier = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")* }
