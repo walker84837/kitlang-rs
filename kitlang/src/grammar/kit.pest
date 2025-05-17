@@ -19,7 +19,7 @@ conditional = { "if" | "then" | "else" | "match" }
 repeat = { "for" | "do" | "while" }
 label = { "default" }
 operator = { "sizeof" }
-keyword = { "function" | "trait" | "implement" | "return" | "as" | "break" | "defer" }
+keyword = { "function" | "main" | "trait" | "implement" | "return" | "as" | "break" | "defer" }
 exception = { "throw" }
 include = { "include" | "import" }
 macro = { "rules" | "using" | "rule" | "implicit" }
@@ -40,3 +40,21 @@ type = {
 }
 
 identifier = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")* }
+
+program = _{ SOI ~ (function)* ~ EOI }
+
+function = {
+    "function" ~ "main" ~ "(" ~ ")" ~ block
+}
+
+block = {
+    "{" ~ (statement)* ~ "}"
+}
+
+statement = {
+    (printf_statement) ~ ";"
+}
+
+printf_statement = {
+    "printf" ~ "(" ~ string ~ "," ~ string ~ ")"
+}

@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand};
+use kitlang::codegen::compile;
 use kitlang::lexer::Token;
 use kitlang::logos::{Lexer, Logos};
-use kitlang::parser::compile;
 use std::fs;
 use std::path::PathBuf;
 
