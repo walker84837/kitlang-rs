@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use kitlang::codegen::compile;
+use kitlang::codegen::frontend;
 use kitlang::lexer::Token;
 use kitlang::logos::{Lexer, Logos};
 use std::fs;
@@ -43,5 +43,8 @@ fn compile_program(source: PathBuf) {
     let source = fs::read_to_string(source).expect("Failed to read source file");
 
     let mut lexer: Lexer<Token> = Token::lexer(&source);
-    compile(&mut lexer);
+
+    let tokens = lexer.spanned().collect::<Vec<_>>();
+    let program = frontend::Compiler::new(vec![source.into()], "output", None);
+    program.compile();
 }

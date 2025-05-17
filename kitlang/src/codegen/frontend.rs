@@ -3,17 +3,17 @@ use pest::Parser;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-enum Optimizations {
+pub enum Optimizations {
     Simple = 1,
     Medium = 2,
     Aggressive = 3,
 }
 
-struct Compiler {
-    files: Vec<PathBuf>,
-    output: PathBuf,
+pub struct Compiler {
+    pub files: Vec<PathBuf>,
+    pub output: PathBuf,
+    pub opt_level: Option<Optimizations>,
     verbose_messages: bool,
-    opt_level: Option<Optimizations>,
 }
 
 impl Compiler {
