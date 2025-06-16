@@ -2,7 +2,7 @@ use std::env;
 use std::path::PathBuf;
 use which::which;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Toolchain {
     GCC,
     Clang,
@@ -10,7 +10,19 @@ pub enum Toolchain {
     Other(String),
 }
 
-#[derive(Debug)]
+impl Toolchain {
+    /// Return the canonical command to invoke this toolchain.
+    pub fn command(&self) -> &str {
+        match self {
+            Toolchain::GCC => "gcc",
+            Toolchain::Clang => "clang",
+            Toolchain::MSVC => "cl",
+            Toolchain::Other(s) => s,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct CompilerOptions {
     pub toolchain: Toolchain,
     pub target: Vec<PathBuf>,
@@ -39,9 +51,7 @@ impl CompilerOptions {
                 Toolchain::MSVC => {
                     self.link_opts.push(format!("{}.lib", lib.as_ref()));
                 }
-                Toolchain::Other(_) => {
-                    // optional: warn or ignore
-                }
+                Toolchain::Other(_) => {}
             }
         }
         self
@@ -55,10 +65,10 @@ impl CompilerOptions {
             let path: PathBuf = p.into();
             match self.toolchain {
                 Toolchain::GCC | Toolchain::Clang => {
-                    self.link_opts.push(format!("-L{}", &path.display()));
+                    self.link_opts.push(format!("-L{}", path.display()));
                 }
                 Toolchain::MSVC => {
-                    self.link_opts.push(format!("/LIBPATH:{}", &path.display()));
+                    self.link_opts.push(format!("/LIBPATH:{}", path.display()));
                 }
                 Toolchain::Other(_) => {}
             }
@@ -70,36 +80,32 @@ impl CompilerOptions {
     where
         P: Into<PathBuf> + AsRef<std::ffi::OsStr>,
     {
-        for path in targets {
-            self.target.push(path.into());
+        for t in targets {
+            self.target.push(t.into());
         }
         self
     }
 
     pub fn build(self) -> CompilerOptions {
-        CompilerOptions {
-            toolchain: self.toolchain,
-            compiler_path: self.compiler_path,
-            target: self.target,
-            link_opts: self.link_opts,
-        }
+        self
     }
 }
 
 pub fn get_system_compiler() -> Option<(Toolchain, PathBuf)> {
-    // check CC environment variable
-    if let Ok(env_cc) = env::var("CC")
-        && let Ok(path) = which(&env_cc)
-    {
-        return Some((detect_toolchain(&path), path));
+    // Search from CC environment variables
+    if let Ok(env_cc) = env::var("CC") {
+        if let Ok(path) = which(&env_cc) {
+            return Some((detect_toolchain(&path), path));
+        }
     }
 
-    // check known compilers in order
+    // Search PATH for known compilers
     for name in &["gcc", "clang", "cl", "cc"] {
         if let Ok(path) = which(name) {
             return Some((detect_toolchain(&path), path));
         }
     }
+
     None
 }
 
@@ -110,15 +116,13 @@ fn detect_toolchain(path: &PathBuf) -> Toolchain {
         .unwrap_or("")
         .to_lowercase();
 
-    let toolchain = if exe.contains("gcc") {
+    if exe.contains("gcc") {
         Toolchain::GCC
     } else if exe.contains("clang") {
         Toolchain::Clang
-    } else if exe.contains("cl") {
+    } else if exe == "cl" {
         Toolchain::MSVC
     } else {
         Toolchain::Other(exe)
-    };
-
-    toolchain
+    }
 }
