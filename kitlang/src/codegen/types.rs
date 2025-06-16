@@ -7,7 +7,7 @@ pub enum Type {
     CString,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Include {
     pub path: String,
 }

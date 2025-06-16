@@ -1,5 +1,6 @@
 use crate::codegen::types::*;
 use crate::{KitParser, Rule};
+use log::debug;
 use pest::Parser;
 use pest::iterators::Pair;
 use std::path::{Path, PathBuf};
@@ -32,7 +33,7 @@ impl Compiler {
         }
     }
 
-    fn parse(&mut self) -> Vec<Function> {
+    fn parse(&mut self) -> Program {
         let mut includes = Vec::new();
         let mut functions = Vec::new();
         for file in &self.files {
@@ -48,12 +49,12 @@ impl Compiler {
                 }
             }
         }
-        // store includes/imports somewhere or return a richer AST
-        // for now, stash in a field or return a Program struct
-        // e.g. Program { includes, imports, functions }
-        // but to keep minimal, we might store them on the Compiler
-        self.includes = includes;
-        functions
+        self.includes = includes.clone();
+        Program {
+            includes,
+            imports: Vec::new(),
+            functions,
+        }
     }
 
     fn parse_include(&self, pair: Pair<Rule>) -> Include {
@@ -68,10 +69,9 @@ impl Compiler {
     fn parse_function(&self, pair: Pair<Rule>) -> Function {
         let mut inner = pair.into_inner();
 
-        // Function name
         let name = inner.next().unwrap().as_str().to_string();
+        debug!("parse_function: Function name: {}", name);
 
-        // Parse parameters if present
         let params = if let Some(node) = inner.peek() {
             if node.as_rule() == Rule::params {
                 let params_node = inner.next().unwrap();
@@ -83,7 +83,7 @@ impl Compiler {
             Vec::new()
         };
 
-        // Parse return type if present
+        debug!("params: {:#?}", params);
         let return_type = if let Some(node) = inner.peek() {
             if node.as_rule() == Rule::type_annotation {
                 let type_node = inner.next().unwrap();
@@ -98,6 +98,7 @@ impl Compiler {
         // Parse function body
         let body_node = inner.next().expect("function body block");
         let body = self.parse_block(body_node);
+        debug!("body: {:#?}", body);
 
         Function {
             name,
@@ -109,29 +110,36 @@ impl Compiler {
 
     fn parse_params(&self, pair: Pair<Rule>) -> Vec<Param> {
         // param_list = { param ~ ("," ~ param )* }
-        pair.into_inner()
+        let params = pair
+            .into_inner()
             .filter(|p| p.as_rule() == Rule::param)
             .map(|p| {
                 let mut inner = p.into_inner();
                 let name = inner.next().unwrap().as_str().to_string();
-                let ty = inner.next().unwrap().as_str().to_string();
-                Param {
-                    name,
-                    ty: Type::Named(ty),
-                }
+                let type_node = inner.next().unwrap();
+                let ty = self.parse_type(type_node);
+                Param { name, ty }
             })
-            .collect()
+            .collect();
+        debug!("params: {:#?}", params);
+        params
     }
 
     fn parse_block(&self, pair: Pair<Rule>) -> Block {
-        // block = { "{" ~ stmt* ~ "}" }
+        // block = { "{" ~ (statement)* ~ "}" }
         let stmts = pair
             .into_inner()
-            .filter_map(|p| match p.as_rule() {
-                Rule::var_decl => Some(self.parse_var_decl(p)),
-                Rule::expr_stmt => Some(self.parse_expr_stmt(p)),
-                Rule::return_stmt => Some(self.parse_return(p)),
-                _ => None,
+            // grammar gives us a wrapper Rule::statement
+            .filter(|p| p.as_rule() == Rule::statement)
+            .map(|stmt_pair| {
+                // unwrap the single child inside statement
+                let inner = stmt_pair.into_inner().next().unwrap();
+                match inner.as_rule() {
+                    Rule::var_decl => self.parse_var_decl(inner),
+                    Rule::expr_stmt => self.parse_expr_stmt(inner),
+                    Rule::return_stmt => self.parse_return(inner),
+                    other => unreachable!("unexpected statement: {:?}", other),
+                }
             })
             .collect();
         Block { stmts }
@@ -139,32 +147,43 @@ impl Compiler {
 
     fn parse_var_decl(&self, pair: Pair<Rule>) -> Stmt {
         // var_decl = { ("var"|"const") ~ ident ~ (":" ~ type_annotation)? ~ ("=" ~ expr)? ~ ";" }
-        let mut inner = pair.into_inner();
-        let _kw = inner.next().unwrap(); // var
-        let name = inner.next().unwrap().as_str().to_string();
-        let next = inner.next().unwrap();
-        // maybe has explicit type
-        let (ty, after_ty) = if next.as_rule() == Rule::type_annotation {
-            (Some(self.parse_type(next)), inner.next().unwrap())
-        } else {
-            (None, next)
-        };
+        let mut name: Option<String> = None;
+        let mut ty: Option<Type> = None;
+        let mut init: Option<Expr> = None;
 
-        // maybe initializer
-        let init = if after_ty.as_rule() == Rule::expr {
-            Some(self.parse_expr(after_ty))
-        } else {
-            None
-        };
+        for child in pair.into_inner() {
+            match child.as_rule() {
+                Rule::identifier if name.is_none() => {
+                    // first identifier is the var name
+                    name = Some(child.as_str().to_string());
+                }
+                Rule::type_annotation => {
+                    // e.g. ": CString"
+                    ty = Some(self.parse_type(child));
+                }
+                Rule::expr => {
+                    init = Some(self.parse_expr(child));
+                }
+                _ => { /* skip punctuation and the 'var'/'const' keyword */ }
+            }
+        }
 
+        // name must be present
+        let name = name.expect("var_decl missing identifier");
         Stmt::VarDecl { name, ty, init }
     }
 
     fn parse_type(&self, pair: Pair<Rule>) -> Type {
-        // pair.as_str() gives e.g. "int" or "Foo[Bar]"
         let mut inner = pair.into_inner();
-        let base = inner.next().unwrap().as_str().to_string();
-        let mut ty = Type::Named(base);
+        let base = inner.next().unwrap().as_str();
+        // turn known names into their enum cases
+        let mut ty = match base {
+            "int" => Type::Int,
+            "float" => Type::Float,
+            "CString" => Type::CString,
+            other => Type::Named(other.to_string()),
+        };
+
         // if there are array or pointer annotations, handle here…
         for sub in inner {
             // you can extend to multi-dimensional or pointer types
@@ -181,9 +200,8 @@ impl Compiler {
         }
     }
 
-    fn transpile(&mut self) {
-        let functions = self.parse();
-        let c_code = self.generate_c_code(functions);
+    fn transpile_with_program(&mut self, prog: Program) {
+        let c_code = self.generate_c_code(prog);
         std::fs::write(&self.output, c_code).expect("Failed to write output");
     }
 
@@ -201,6 +219,24 @@ impl Compiler {
     }
 
     fn parse_expr(&self, pair: Pair<Rule>) -> Expr {
+        // first, peel off any of the wrapper rules:
+        match pair.as_rule() {
+            Rule::expr
+            | Rule::assign
+            | Rule::logical_or
+            | Rule::logical_and
+            | Rule::equality
+            | Rule::comparison
+            | Rule::additive
+            | Rule::multiplicative
+            | Rule::unary => {
+                let inner = pair.into_inner().next().unwrap();
+                return self.parse_expr(inner);
+            }
+            _ => {}
+        }
+
+        // now handle the real terminals
         match pair.as_rule() {
             Rule::identifier => Expr::Identifier(pair.as_str().to_string()),
             Rule::literal => {
@@ -210,15 +246,16 @@ impl Compiler {
                     "false" => Expr::Literal(Literal::Bool(false)),
                     "null" => Expr::Literal(Literal::Null),
                     _ => {
-                        let i = s
-                            .parse::<i64>()
-                            .expect("number literal should parse as i64");
+                        // integer literal
+                        let i = s.parse::<i64>().expect("invalid int literal");
                         Expr::Literal(Literal::Int(i))
                     }
                 }
             }
-            Rule::float => Expr::Literal(Literal::Float(pair.as_str().parse().unwrap())),
-            // TODO: string literal
+            Rule::float => {
+                let f = pair.as_str().parse::<f64>().expect("invalid float literal");
+                Expr::Literal(Literal::Float(f))
+            }
             Rule::string => {
                 let full = pair.as_str();
                 let inner = &full[1..full.len() - 1];
@@ -237,13 +274,14 @@ impl Compiler {
                 let inner = pair.into_inner().next().unwrap();
                 self.parse_expr(inner)
             }
-            _ => panic!("Unexpected expr rule: {:?}", pair.as_rule()),
+            other => panic!("Unexpected expr rule: {:?}", other),
         }
     }
 
-    fn generate_c_code(&self, functions: Vec<Function>) -> String {
+    fn generate_c_code(&self, prog: Program) -> String {
+        debug!("Generating C code");
         let mut c_code = String::new();
-        for inc in &self.includes {
+        for inc in &prog.includes {
             let line = if inc.path.ends_with(".h") {
                 if inc.path.starts_with('<') {
                     format!("#include {}\n", inc.path)
@@ -257,9 +295,12 @@ impl Compiler {
             c_code.push_str(&line);
         }
         c_code.push_str("\n");
+        debug!("includes: {:#?}", self.includes);
 
-        for func in functions {
-            c_code.push_str(&self.transpile_function(&func));
+        for func in prog.functions {
+            let function = &self.transpile_function(&func);
+            debug!("Function: {}", function);
+            c_code.push_str(&function);
             c_code.push_str("\n\n");
         }
 
@@ -267,14 +308,13 @@ impl Compiler {
     }
 
     fn transpile_function(&self, func: &Function) -> String {
-        let return_type = match &func.return_type {
-            Some(Type::Int) => "int",
-            Some(Type::Float) => "float",
-            Some(Type::CString) => "char*",
-            Some(Type::Ptr(inner)) => return format!("{}*", self.transpile_type(inner)),
-            Some(Type::Named(name)) => name,
-            None => "void",
-        };
+        let return_type = func
+            .return_type
+            .as_ref()
+            .map(|t| self.transpile_type(t))
+            .unwrap_or_else(|| "void".to_string());
+
+        debug!("return type: {}", return_type);
 
         let params = func
             .params
@@ -310,6 +350,7 @@ impl Compiler {
                     code.push_str(&self.transpile_expr(expr));
                     code.push_str(";\n");
                 }
+                // TODO: should add a return to the main function anyway
                 Stmt::Return(expr) => {
                     let expr_str = expr
                         .as_ref()
@@ -322,6 +363,7 @@ impl Compiler {
     }
 
     fn transpile_expr(&self, expr: &Expr) -> String {
+        debug!("Transpiling expr: {:#?}", expr);
         match expr {
             Expr::Identifier(id) => id.clone(),
             Expr::Literal(lit) => match lit {
@@ -353,9 +395,9 @@ impl Compiler {
     }
 
     pub fn compile(&mut self) {
-        self.parse();
+        let prog = self.parse();
         self.optimize();
-        self.transpile();
+        self.transpile_with_program(prog);
 
         let out_c = if self.output.extension().unwrap_or_default() == "c" {
             self.output.clone()
