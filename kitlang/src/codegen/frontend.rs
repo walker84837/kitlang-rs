@@ -1,8 +1,8 @@
 use crate::codegen::types::*;
 use crate::{KitParser, Rule};
 use log::debug;
-use pest::Parser;
 use pest::iterators::Pair;
+use pest::Parser;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -414,6 +414,7 @@ impl Compiler {
             .unwrap()
             .to_string();
 
+        // TODO: get default compiler from system
         let status = Command::new("gcc")
             .arg(&out_c)
             .arg("-o")
