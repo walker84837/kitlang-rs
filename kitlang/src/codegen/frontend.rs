@@ -16,7 +16,6 @@ pub struct Compiler {
     pub output: PathBuf,
     pub opt_level: Option<Optimizations>,
     includes: Vec<Include>,
-    verbose_messages: bool,
 }
 
 impl Compiler {
@@ -28,7 +27,6 @@ impl Compiler {
         Self {
             files,
             output: output.as_ref().to_path_buf(),
-            verbose_messages: false,
             includes: Vec::new(),
             opt_level,
         }
@@ -70,33 +68,36 @@ impl Compiler {
     fn parse_function(&self, pair: Pair<Rule>) -> Function {
         let mut inner = pair.into_inner();
 
-        // Consume "function" keyword
-        let _ = inner.next().expect("function keyword");
-
         // Function name
         let name = inner.next().unwrap().as_str().to_string();
 
-        // Consume opening '('
-        let _ = inner.next().expect("opening parenthesis");
-
         // Parse parameters if present
-        let params = inner
-            .next()
-            .filter(|p| p.as_rule() == Rule::params)
-            .map(|p| self.parse_params(p))
-            .unwrap_or_default();
+        let params = if let Some(node) = inner.peek() {
+            if node.as_rule() == Rule::params {
+                let params_node = inner.next().unwrap();
+                self.parse_params(params_node)
+            } else {
+                Vec::new()
+            }
+        } else {
+            Vec::new()
+        };
 
-        // Consume closing ')'
-        let _ = inner.next().expect("closing parenthesis");
-
-        // Parse optional return type
-        let return_type = inner
-            .next()
-            .filter(|p| p.as_rule() == Rule::type_annotation)
-            .map(|p| self.parse_type(p));
+        // Parse return type if present
+        let return_type = if let Some(node) = inner.peek() {
+            if node.as_rule() == Rule::type_annotation {
+                let type_node = inner.next().unwrap();
+                Some(self.parse_type(type_node))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
 
         // Parse function body
-        let body = self.parse_block(inner.next().expect("function body block"));
+        let body_node = inner.next().expect("function body block");
+        let body = self.parse_block(body_node);
 
         Function {
             name,
