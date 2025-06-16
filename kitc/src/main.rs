@@ -28,6 +28,7 @@ enum Commands {
 }
 
 fn main() {
+    env_logger::init();
     let args = Cli::parse();
 
     match args.command {
