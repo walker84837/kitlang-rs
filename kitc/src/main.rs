@@ -17,13 +17,13 @@ enum Commands {
     Compile {
         /// the `.kit` source file
         #[arg(short, long)]
-        path: PathBuf,
+        source: PathBuf,
     },
     /// Compile then run the resulting executable
     Run {
         /// the `.kit` source file
         #[arg(short, long)]
-        path: PathBuf,
+        source: PathBuf,
     },
 }
 
@@ -32,12 +32,12 @@ fn main() {
     let args = Cli::parse();
 
     match args.command {
-        Commands::Compile { path } => {
-            compile_and_maybe_run(&path, false);
+        Commands::Compile { source } => {
+            compile_and_maybe_run(&source, false);
             println!("→ Successfully compiled!");
         }
-        Commands::Run { path } => {
-            compile_and_maybe_run(&path, true);
+        Commands::Run { source } => {
+            compile_and_maybe_run(&source, true);
         }
     }
 }

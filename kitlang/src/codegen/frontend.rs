@@ -4,9 +4,9 @@ use log::debug;
 use pest::iterators::Pair;
 use pest::Parser;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 pub enum Optimizations {
+    // Should be handled by the compiler itself
     Simple = 1,
     Medium = 2,
     Aggressive = 3,
@@ -414,13 +414,13 @@ impl Compiler {
             .unwrap()
             .to_string();
 
-        // TODO: get default compiler from system
-        let status = Command::new("gcc")
-            .arg(&out_c)
-            .arg("-o")
-            .arg(&exe_name)
-            .status()
-            .expect("Failed to run gcc");
+        let detected = crate::compiler::get_system_compiler().unwrap();
+
+        let opts = CompilerOptions::new(detected.toolchain, detected.compiler_path)
+            .link_lib("m")
+            .add_lib_path("/usr/local/lib")
+            .add_target("main.c")
+            .build();
 
         if !status.success() {
             panic!("Compilation failed");
