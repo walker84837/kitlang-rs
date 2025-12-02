@@ -1,8 +1,9 @@
 use crate::codegen::types::*;
 use crate::{KitParser, Rule};
 use log::debug;
-use pest::iterators::Pair;
 use pest::Parser;
+use pest::iterators::Pair;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 pub enum Optimizations {
@@ -15,32 +16,28 @@ pub enum Optimizations {
 pub struct Compiler {
     pub files: Vec<PathBuf>,
     pub output: PathBuf,
-    pub opt_level: Option<Optimizations>,
     includes: Vec<Include>,
 }
 
 impl Compiler {
-    pub fn new(
-        files: Vec<PathBuf>,
-        output: impl AsRef<Path>,
-        opt_level: Option<Optimizations>,
-    ) -> Self {
+    pub fn new(files: Vec<PathBuf>, output: impl AsRef<Path>) -> Self {
         Self {
             files,
             output: output.as_ref().to_path_buf(),
             includes: Vec::new(),
-            opt_level,
         }
     }
 
     fn parse(&mut self) -> Program {
         let mut includes = Vec::new();
         let mut functions = Vec::new();
+
         for file in &self.files {
             let input = std::fs::read_to_string(file).expect("Failed to read file");
             let mut pairs = KitParser::parse(Rule::program, &input)
                 .expect("Parse failed")
                 .into_iter();
+
             while let Some(pair) = pairs.next() {
                 match pair.as_rule() {
                     Rule::include => includes.push(self.parse_include(pair)),
@@ -49,10 +46,12 @@ impl Compiler {
                 }
             }
         }
+
         self.includes = includes.clone();
+
         Program {
             includes,
-            imports: Vec::new(),
+            imports: HashSet::new(),
             functions,
         }
     }
@@ -178,8 +177,10 @@ impl Compiler {
         let base = inner.next().unwrap().as_str();
         // turn known names into their enum cases
         let mut ty = match base {
-            "int" => Type::Int,
-            "float" => Type::Float,
+            "Int" => Type::Int,
+            "Float" => Type::Float,
+            "Char" => Type::Char,
+            "Size" => Type::Size,
             "CString" => Type::CString,
             other => Type::Named(other.to_string()),
         };
@@ -191,13 +192,6 @@ impl Compiler {
             ty = Type::Ptr(Box::new(inner_ty));
         }
         ty
-    }
-
-    fn optimize(&self) {
-        // TODO: implement real optimizations
-        if let Some(Optimizations::Simple) = self.opt_level {
-            eprintln!("Simple optimization: (none implemented)");
-        }
     }
 
     fn transpile_with_program(&mut self, prog: Program) {
@@ -279,32 +273,61 @@ impl Compiler {
     }
 
     fn generate_c_code(&self, prog: Program) -> String {
-        debug!("Generating C code");
-        let mut c_code = String::new();
+        let mut seen = std::collections::HashSet::new();
+        let mut out = String::new();
+
+        // 1) emit regular includes from the source `include` statements
         for inc in &prog.includes {
-            let line = if inc.path.ends_with(".h") {
-                if inc.path.starts_with('<') {
-                    format!("#include {}\n", inc.path)
-                } else {
-                    format!("#include \"{}\"\n", inc.path)
-                }
+            let line = if inc.path.starts_with('<') || inc.path.ends_with(".h>") {
+                format!("#include {}\n", inc.path)
             } else {
-                // fallback
-                format!("#include \"{}\"\n", inc.path)
+                format!("#include \"{}\"\n", inc.path.trim_matches('"'))
             };
-            c_code.push_str(&line);
+            out.push_str(&line);
         }
-        c_code.push_str("\n");
-        debug!("includes: {:#?}", self.includes);
 
+        // 2) scan every function signature & body for types to gather their headers/typedefs
+        for func in &prog.functions {
+            // return type
+            if let Some(r) = &func.return_type
+                && let Some(hdr) = type_to_c(r).required_header.clone()
+            {
+                seen.insert(hdr);
+            }
+            // params
+            for p in &func.params {
+                if let Some(hdr) = type_to_c(&p.ty).required_header.clone() {
+                    seen.insert(hdr);
+                }
+            }
+            // body: any local decls with explicit types
+            for stmt in &func.body.stmts {
+                if let Stmt::VarDecl { ty: Some(t), .. } = stmt {
+                    if let Some(hdr) = type_to_c(t).required_header.clone() {
+                        seen.insert(hdr);
+                    }
+                }
+            }
+        }
+
+        // 3) emit each unique header or typedef
+        for hdr in seen {
+            if hdr.starts_with("typedef") {
+                // raw typedef
+                out.push_str(&hdr);
+            } else {
+                // assume it's "<…>"
+                out.push_str(&format!("#include {}\n", hdr));
+            }
+        }
+        out.push_str("\n");
+
+        // 4) emit functions as before…
         for func in prog.functions {
-            let function = &self.transpile_function(&func);
-            debug!("Function: {}", function);
-            c_code.push_str(&function);
-            c_code.push_str("\n\n");
+            out.push_str(&self.transpile_function(&func));
+            out.push_str("\n\n");
         }
-
-        c_code
+        out
     }
 
     fn transpile_function(&self, func: &Function) -> String {
@@ -391,12 +414,12 @@ impl Compiler {
             Type::CString => "char*".to_string(),
             Type::Ptr(inner) => format!("{}*", self.transpile_type(inner)),
             Type::Named(name) => name.clone(),
+            _ => todo!("Unsupported type: {:#?}", ty),
         }
     }
 
     pub fn compile(&mut self) {
         let prog = self.parse();
-        self.optimize();
         self.transpile_with_program(prog);
 
         let out_c = if self.output.extension().unwrap_or_default() == "c" {

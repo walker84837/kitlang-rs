@@ -1,8 +1,6 @@
 use clap::{Parser, Subcommand};
 use kitlang::codegen::frontend::Compiler;
-use std::fs;
-use std::path::PathBuf;
-use std::process::Command;
+use std::{fs, path::PathBuf, process::Command};
 
 #[derive(Parser)]
 #[command(name = "kitc", version, about = "kit compiler")]
@@ -42,13 +40,12 @@ fn main() {
     }
 }
 
-fn compile_and_maybe_run(source: &PathBuf, run: bool) {
+fn compile_and_maybe_run(source: &PathBuf, run: bool) -> Result<(), ()> {
     let _ = fs::read_to_string(source).unwrap_or_else(|_| panic!("couldn’t read {:?}", source));
 
-    // derive the C-file name: e.g. foo.kit → foo.c
     let c_file = source.with_extension("c");
 
-    let mut compiler = Compiler::new(vec![source.clone()], &c_file, None);
+    let mut compiler = Compiler::new(vec![source.clone()], &c_file);
 
     compiler.compile();
 
@@ -67,4 +64,5 @@ fn compile_and_maybe_run(source: &PathBuf, run: bool) {
             std::process::exit(status.code().unwrap_or(1));
         }
     }
+    Ok(())
 }
