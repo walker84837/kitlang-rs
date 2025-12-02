@@ -1,5 +1,5 @@
 use crate::codegen::{
-    compiler::{self, CompilerOptions},
+    compiler::CompilerOptions,
     types::*,
 };
 use std::process::Command;
