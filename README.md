@@ -1,6 +1,6 @@
 # kitlang-rs
 
-Kitlang-rs is an experimental Rust port of the [Kit compiler](https://github.com/kitlang/kit), aiming to bring the Kit programming language to the Rust ecosystem.
+kitlang-rs is an experimental Rust port of the [Kit compiler](https://github.com/kitlang/kit)[^1], aiming to bring the Kit programming language to the Rust ecosystem.
 
 ## Motivation
 
@@ -22,25 +22,29 @@ Notable links:
 
 The following features are planned for the compiler rewrite:
 
-- Basic compiler infrastructure
+- Basic compiler infrastructure:
   * [X] (**WIP**) Transpile Kit code to C99 and use the local C compiler for compilation
-    - [ ] Add linking flags for compatibility with C libraries
+    - [X] Add linking flags for compatibility with C libraries (detected, but arguments not fully wired yet)
     - [ ] Add custom flags configuration for custom or uncommon compiler toolchain
   * [ ] Implement meaningful error messages instead of panics
 
 - Compiler CLI
   * [ ] Introduce a compilation progress bar for improved user experience
   * [ ] Display elapsed compilation time for performance monitoring
-  * Cargo-like usage
-    - [ ] Kit projects seems to have a [kit.yaml](https://github.com/bendmorris/krit-kit/blob/master/kit.yaml), which looks like a Cargo.toml
+
+- Package manager:
+    - [ ] Cargo-like usage
+    - [ ] Kit projects seem to have a [kit.yaml](https://github.com/bendmorris/krit-kit/blob/master/kit.yaml), which looks like a Cargo.toml
     - [ ] Documentation generation (inspired from `cargo doc`)
 
-- Standard Library
+- Standard library:
   * [ ] Develop a standard library using as much Kit code as possible
-  * [ ] Zero-cost abstractions
+  * [ ] Zero-cost abstractions (if possible)
 
 ## Licensing
 
 kitlang-rs is dual-licensed under the [Apache License, Version 2.0](LICENSE-APACHE) and the [MIT License](LICENSE-MIT), either at your option.
 
 **DISCLAIMER**: This project is entirely independent of the original [Kit compiler](https://github.com/kitlang/kit) and is not affiliated with the original developers.
+
+[^1]: If you want to be more pedantic, the more correct wording is *transpiler* as it outputs C source code, not machine code.
