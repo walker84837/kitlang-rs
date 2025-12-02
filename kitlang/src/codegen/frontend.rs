@@ -1,4 +1,9 @@
-use crate::codegen::types::*;
+use crate::codegen::{
+    compiler::{self, CompilerOptions},
+    types::*,
+};
+use std::process::Command;
+use crate::codegen::compiler::CompilerMeta;
 use crate::{KitParser, Rule};
 use log::debug;
 use pest::Parser;
@@ -437,13 +442,16 @@ impl Compiler {
             .unwrap()
             .to_string();
 
-        let detected = crate::compiler::get_system_compiler().unwrap();
-
-        let opts = CompilerOptions::new(detected.toolchain, detected.compiler_path)
-            .link_lib("m")
-            .add_lib_path("/usr/local/lib")
-            .add_target("main.c")
+        let detected = crate::codegen::compiler::get_system_compiler().unwrap();
+        let opts = CompilerOptions::new(CompilerMeta(detected.0, detected.1.clone()))
+            .link_libs(&["m"])
+            .lib_paths(&["/usr/local/lib"])
+            .targets(&[out_c.clone().into_os_string().into_string().unwrap()])
             .build();
+
+        let mut cmd = Command::new(detected.1.clone());
+        let output = cmd.output().expect("failed to execute compiler");
+        let status = output.status;
 
         if !status.success() {
             panic!("Compilation failed");

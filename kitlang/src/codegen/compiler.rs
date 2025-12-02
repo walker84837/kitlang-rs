@@ -30,7 +30,8 @@ pub struct CompilerOptions {
     pub compiler_path: PathBuf,
 }
 
-pub struct CompilerMeta(Toolchain, PathBuf);
+#[derive(Debug, Clone)]
+pub struct CompilerMeta(pub Toolchain, pub PathBuf);
 
 impl CompilerOptions {
     pub fn new(base_meta: CompilerMeta) -> Self {
