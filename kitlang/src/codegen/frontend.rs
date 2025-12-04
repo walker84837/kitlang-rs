@@ -43,8 +43,8 @@ impl Compiler {
 
             for pair in pairs {
                 match pair.as_rule() {
-                    Rule::include => includes.push(self.parse_include(pair)),
-                    Rule::function => functions.push(self.parse_function(pair)),
+                    Rule::include_stmt => includes.push(self.parse_include(pair)),
+                    Rule::function_decl => functions.push(self.parse_function(pair)),
                     _ => {}
                 }
             }
@@ -72,7 +72,6 @@ impl Compiler {
         let mut inner = pair.into_inner();
 
         let name = inner.next().unwrap().as_str().to_string();
-        debug!("parse_function: Function name: {}", name);
 
         let params = if let Some(node) = inner.peek() {
             if node.as_rule() == Rule::params {
@@ -85,7 +84,6 @@ impl Compiler {
             Vec::new()
         };
 
-        debug!("params: {:#?}", params);
         let return_type = if let Some(node) = inner.peek() {
             if node.as_rule() == Rule::type_annotation {
                 let type_node = inner.next().unwrap();
@@ -100,7 +98,6 @@ impl Compiler {
         // Parse function body
         let body_node = inner.next().expect("function body block");
         let body = self.parse_block(body_node);
-        debug!("body: {:#?}", body);
 
         Function {
             name,
@@ -123,7 +120,6 @@ impl Compiler {
                 Param { name, ty }
             })
             .collect();
-        debug!("params: {:#?}", params);
         params
     }
 
@@ -177,7 +173,7 @@ impl Compiler {
 
     fn parse_type(&self, pair: Pair<Rule>) -> Type {
         let mut inner = pair.into_inner();
-        let base = inner.next().unwrap().as_str();
+        let base = inner.next().unwrap().as_str().trim();
         // turn known names into their enum cases
         let mut ty = match base {
             "Int" => Type::Int,
@@ -226,7 +222,11 @@ impl Compiler {
             | Rule::comparison
             | Rule::additive
             | Rule::multiplicative
-            | Rule::unary => {
+            | Rule::unary
+            | Rule::bitwise_or
+            | Rule::bitwise_xor
+            | Rule::bitwise_and
+            | Rule::shift => {
                 let inner = pair.into_inner().next().unwrap();
                 return self.parse_expr(inner);
             }
@@ -258,7 +258,7 @@ impl Compiler {
                 let inner = &full[1..full.len() - 1];
                 Expr::Literal(Literal::String(inner.to_string()))
             }
-            Rule::function_call => {
+            Rule::function_call_expr => {
                 let mut inner = pair.into_inner();
                 let callee = inner.next().unwrap().as_str().to_string();
                 let args = inner

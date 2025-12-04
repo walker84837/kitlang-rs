@@ -1,27 +1,44 @@
 WHITESPACE = _{ " " | "\t" | NEWLINE }
 NEWLINE = _{ "\n" | "\r\n" }
 
-program = _{ SOI ~ (import | include | function)* ~ EOI }
+program = _{ SOI ~ (import_stmt | include_stmt | function_decl | type_def | trait_def | trait_impl | rule_set | using_stmt)* ~ EOI }
 
-import = { "import" ~ path ~ ";" }
-include = { "include" ~ string ~ ";" }
-path = @{ identifier ~ ("." ~ identifier)* ~ ("." ~ ("*" | "**"))? }
+import_stmt = { "import" ~ path ~ ("." ~ ("*" | "**"))? ~ ";" }
+include_stmt = { "include" ~ string ~ ("=>" ~ string)? ~ ";" }
+path = @{ identifier ~ ("." ~ identifier)* }
 
-function = {
+function_decl = {
     "function" ~ identifier ~ "(" ~ params? ~ ")" ~ (":" ~ type_annotation)? ~ block
 }
 
 params = { param ~ ("," ~ param)* }
 param = { identifier ~ ":" ~ type_annotation }
 
-type_annotation = { identifier ~ ("[" ~ type_annotation ~ ("," ~ type_annotation)* ~ "]")? }
+type_annotation = { function_type | pointer_type | tuple_type | base_type }
+function_type = { "function" ~ "(" ~ (type_annotation ~ ("," ~ type_annotation)*)? ~ ")" ~ "->" ~ type_annotation }
+pointer_type = { "&" ~ type_annotation }
+tuple_type = { "(" ~ type_annotation ~ ("," ~ type_annotation)+ ~ ")" }
+base_type = { identifier ~ ("[" ~ type_annotation ~ ("," ~ type_annotation)* ~ "]")? }
 
 block = { "{" ~ (statement)* ~ "}" }
 
 statement = {
     var_decl |
     expr_stmt |
-    return_stmt
+    return_stmt |
+    if_stmt |
+    for_stmt |
+    while_stmt |
+    do_while_stmt |
+    match_stmt |
+    continue_stmt |
+    break_stmt |
+    yield_stmt |
+    typedef_stmt |
+    extend_stmt |
+    macro_decl |
+    macro_call |
+    rule_decl
 }
 
 var_decl = { ("var" | "const") ~ identifier ~ (":" ~ type_annotation)? ~ ("=" ~ expr)? ~ ";" }
@@ -30,29 +47,100 @@ expr_stmt = { expr ~ ";" }
 
 return_stmt = { "return" ~ expr? ~ ";" }
 
+if_stmt = { "if" ~ expr ~ block ~ ("else" ~ (block | if_stmt))? }
+
+for_stmt = { "for" ~ identifier ~ "in" ~ expr ~ block }
+
+while_stmt = { "while" ~ expr ~ block }
+
+do_while_stmt = { "do" ~ block ~ "while" ~ expr ~ ";" }
+
+match_stmt = { "match" ~ expr ~ "{" ~ (match_case)* ~ (default_case)? ~ "}" }
+match_case = { expr ~ "=>" ~ expr }
+default_case = { "default" ~ "=>" ~ expr }
+
+continue_stmt = { "continue" ~ ";" }
+break_stmt = { "break" ~ ";" }
+yield_stmt = { "yield" ~ expr ~ ";" }
+typedef_stmt = { "typedef" ~ identifier ~ "=" ~ type_annotation ~ ";" }
+extend_stmt = { "extend" ~ type_annotation ~ "{" ~ (function_decl | var_decl)* ~ "}" }
+macro_decl = { "macro" ~ function_decl }
+macro_call = { identifier ~ "(" ~ (expr ~ ("," ~ expr)*)? ~ ")" ~ ";" }
+rule_decl = { "rule" ~ "(" ~ expr ~ ")" ~ ("=>" ~ expr)? }
+rule_set = { "rules" ~ identifier ~ "{" ~ (rule_decl)* ~ "}" }
+using_stmt = { "using" ~ (using_clause ~ ("," ~ using_clause)*) ~ ";" }
+using_clause = { ("rules" ~ type_annotation) | ("implicit" ~ expr) }
+
+type_def = { metadata_and_modifiers ~ (enum_def | struct_def | union_def | abstract_def) }
+
+enum_def = { "enum" ~ identifier ~ type_params? ~ "{" ~ (enum_variant)* ~ "}" }
+enum_variant = { metadata_and_modifiers ~ identifier ~ ( "(" ~ (param ~ ("," ~ param)*)? ~ ")" )? ~ ( "=" ~ expr )? ~ ";" }
+
+struct_def = { "struct" ~ identifier ~ type_params? ~ "{" ~ (var_decl)* ~ "}" }
+
+union_def = { "union" ~ identifier ~ type_params? ~ "{" ~ (var_decl)* ~ "}" }
+
+abstract_def = { "abstract" ~ identifier ~ type_params? ~ ":" ~ type_annotation }
+
+metadata_and_modifiers = { (metadata | modifier)* }
+metadata = { "#[" ~ identifier ~ "(" ~ (expr ~ ("," ~ expr)*)? ~ ")" ~ "]" }
+modifier = { "public" | "private" | "inline" | "static" }
+type_params = { "[" ~ (type_param ~ ("," ~ type_param)*)? ~ "]" }
+type_param = { identifier ~ ("=" ~ type_annotation)? }
+
+trait_def = { metadata_and_modifiers ~ "trait" ~ identifier ~ type_params? ~ "(" ~ (type_param ~ ("," ~ type_param)*)? ~ ")" ~ "{" ~ (function_decl | var_decl)* ~ "}" }
+trait_impl = { metadata_and_modifiers ~ "implement" ~ type_annotation ~ type_params? ~ "for" ~ type_annotation ~ "{" ~ (function_decl | var_decl)* ~ "}" }
+
+
 expr = { assign }
-assign = { logical_or ~ ("=" ~ assign)? }
+assign = { logical_or ~ (("=" | assign_op) ~ assign)? }
+assign_op = { "+=" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" | "^=" | "<<=" | ">>=" }
 logical_or = { logical_and ~ ("||" ~ logical_and)* }
 logical_and = { equality ~ ("&&" ~ equality)* }
 equality = { comparison ~ (("==" | "!=") ~ comparison)* }
-comparison = { additive ~ (("<" | ">" | "<=" | ">=") ~ additive)* }
+comparison = { bitwise_or ~ (("<" | ">" | "<=" | ">=") ~ bitwise_or)* }
+bitwise_or = { bitwise_xor ~ ("|" ~ bitwise_xor)* }
+bitwise_xor = { bitwise_and ~ ("^" ~ bitwise_and)* }
+bitwise_and = { shift ~ ("&" ~ shift)* }
+shift = { additive ~ (("<<" | ">>") ~ additive)* }
 additive = { multiplicative ~ (("+" | "-") ~ multiplicative)* }
 multiplicative = { unary ~ (("*" | "/" | "%") ~ unary)* }
-unary = { ("!" | "-" | "&" | "*")* ~ primary }
+unary = { ("!" | "-" | "&" | "*" | "++" | "--" | "~")* ~ primary }
 primary = {
-    function_call |
+    function_call_expr |
+    array_literal |
+    struct_init |
+    union_init |
+    tuple_literal |
     identifier |
     literal |
+    "this" |
+    "Self" |
+    "unsafe" ~ expr |
+    "sizeof" ~ type_annotation |
+    "defined" ~ identifier |
+    "null" |
+    "empty" |
+    "implicit" ~ type_annotation |
+    "static" ~ expr |
     "(" ~ expr ~ ")" |
     string
 }
 
-function_call = { identifier ~ "(" ~ (expr ~ ("," ~ expr)*)? ~ ")" }
+function_call_expr = { identifier ~ "(" ~ (expr ~ ("," ~ expr)*)? ~ ")" }
 
-literal = { number | boolean | "null" }
+array_literal = { "[" ~ (expr ~ ("," ~ expr)*)? ~ "]" }
+struct_init = { "struct" ~ type_annotation ~ "{" ~ (field_init ~ ("," ~ field_init)*)? ~ "}" }
+union_init = { "union" ~ type_annotation ~ "{" ~ field_init ~ "}" }
+field_init = { identifier ~ ":" ~ expr }
+tuple_literal = { "(" ~ expr ~ ("," ~ expr)+ ~ ")" }
+
+
+literal = { number | boolean | char_literal }
 float = @{ ("-"? ~ ASCII_DIGIT+ ~ "." ~ ASCII_DIGIT+) }
 number = @{ ("-"? ~ ASCII_DIGIT+ ~ ("." ~ ASCII_DIGIT+)? ) }
 boolean = { "true" | "false" }
+char_literal = @{ "'" ~ ( "\\'" | !"'" ~ ANY ) ~ "'" }
 
 string = @{ "\"" ~ ( "\\\"" | !"\"" ~ ANY )* ~ "\"" }
 
