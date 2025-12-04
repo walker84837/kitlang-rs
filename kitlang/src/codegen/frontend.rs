@@ -1,15 +1,15 @@
 use crate::codegen::{
-    compiler::CompilerOptions,
+    compiler::{self, CompilerMeta, CompilerOptions},
     types::*,
 };
-use std::process::Command;
-use crate::codegen::compiler::CompilerMeta;
 use crate::{KitParser, Rule};
 use log::debug;
-use pest::Parser;
-use pest::iterators::Pair;
+
+use pest::{Parser, iterators::Pair};
+
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 pub enum Optimizations {
     // Should be handled by the compiler itself
@@ -39,11 +39,9 @@ impl Compiler {
 
         for file in &self.files {
             let input = std::fs::read_to_string(file).expect("Failed to read file");
-            let mut pairs = KitParser::parse(Rule::program, &input)
-                .expect("Parse failed")
-                .into_iter();
+            let pairs = KitParser::parse(Rule::program, &input).expect("Parse failed");
 
-            while let Some(pair) = pairs.next() {
+            for pair in pairs {
                 match pair.as_rule() {
                     Rule::include => includes.push(self.parse_include(pair)),
                     Rule::function => functions.push(self.parse_function(pair)),
@@ -278,10 +276,10 @@ impl Compiler {
     }
 
     fn generate_c_code(&self, prog: Program) -> String {
-        let mut seen = std::collections::HashSet::new();
+        let mut seen = HashSet::new();
         let mut out = String::new();
 
-        // 1) emit regular includes from the source `include` statements
+        // emit regular includes from the source `include` statements
         for inc in &prog.includes {
             let line = if inc.path.starts_with('<') || inc.path.ends_with(".h>") {
                 format!("#include {}\n", inc.path)
@@ -291,7 +289,7 @@ impl Compiler {
             out.push_str(&line);
         }
 
-        // 2) scan every function signature & body for types to gather their headers/typedefs
+        // scan every function signature & body for types to gather their headers/typedefs
         for func in &prog.functions {
             // return type
             if let Some(r) = &func.return_type
@@ -307,27 +305,27 @@ impl Compiler {
             }
             // body: any local decls with explicit types
             for stmt in &func.body.stmts {
-                if let Stmt::VarDecl { ty: Some(t), .. } = stmt {
-                    if let Some(hdr) = type_to_c(t).required_header.clone() {
-                        seen.insert(hdr);
-                    }
+                if let Stmt::VarDecl { ty: Some(t), .. } = stmt
+                    && let Some(hdr) = type_to_c(t).required_header.clone()
+                {
+                    seen.insert(hdr);
                 }
             }
         }
 
-        // 3) emit each unique header or typedef
+        // emit each unique header or typedef
         for hdr in seen {
             if hdr.starts_with("typedef") {
                 // raw typedef
                 out.push_str(&hdr);
             } else {
-                // assume it's "<…>"
+                // assume it's "<...>"
                 out.push_str(&format!("#include {}\n", hdr));
             }
         }
-        out.push_str("\n");
+        out.push('\n');
 
-        // 4) emit functions as before…
+        // emit functions as before...
         for func in prog.functions {
             out.push_str(&self.transpile_function(&func));
             out.push_str("\n\n");
@@ -336,11 +334,14 @@ impl Compiler {
     }
 
     fn transpile_function(&self, func: &Function) -> String {
-        let return_type = func
-            .return_type
-            .as_ref()
-            .map(|t| self.transpile_type(t))
-            .unwrap_or_else(|| "void".to_string());
+        let return_type = if func.name == "main" {
+            "int".to_string()
+        } else {
+            func.return_type
+                .as_ref()
+                .map(|t| self.transpile_type(t))
+                .unwrap_or_else(|| "void".to_string())
+        };
 
         debug!("return type: {}", return_type);
 
@@ -351,7 +352,18 @@ impl Compiler {
             .collect::<Vec<_>>()
             .join(", ");
 
-        let body = self.transpile_block(&func.body);
+        let mut body = self.transpile_block(&func.body);
+
+        if func.name == "main" {
+            let has_return = func
+                .body
+                .stmts
+                .iter()
+                .any(|stmt| matches!(stmt, Stmt::Return(_)));
+            if !has_return {
+                body.push_str("    return 0;\n");
+            }
+        }
 
         format!("{} {}({}) {{\n{}\n}}", return_type, func.name, params, body)
     }
@@ -442,14 +454,24 @@ impl Compiler {
             .unwrap()
             .to_string();
 
-        let detected = crate::codegen::compiler::get_system_compiler().unwrap();
-        let opts = CompilerOptions::new(CompilerMeta(detected.0, detected.1.clone()))
+        let detected = compiler::get_system_compiler().unwrap();
+        let opts = CompilerOptions::new(CompilerMeta(detected.0.clone(), detected.1.clone()))
             .link_libs(&["m"])
             .lib_paths(&["/usr/local/lib"])
             .targets(&[out_c.clone().into_os_string().into_string().unwrap()])
             .build();
 
         let mut cmd = Command::new(detected.1.clone());
+        cmd.arg(out_c.clone());
+
+        if detected.0.is_unix_like() {
+            cmd.arg("-o").arg(&exe_name);
+        } else {
+            todo!("Unsupported compiler: {:#?}", detected.0);
+        }
+
+        cmd.args(&opts.link_opts);
+
         let output = cmd.output().expect("failed to execute compiler");
         let status = output.status;
 
