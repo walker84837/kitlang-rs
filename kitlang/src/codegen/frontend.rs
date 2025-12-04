@@ -81,13 +81,11 @@ impl Compiler {
 
         let name = inner.next().unwrap().as_str().to_string();
 
-        let params = if let Some(node) = inner.peek() {
-            if node.as_rule() == Rule::params {
-                let params_node = inner.next().unwrap();
-                self.parse_params(params_node)
-            } else {
-                Vec::new()
-            }
+        let params = if let Some(node) = inner.peek()
+            && node.as_rule() == Rule::params
+        {
+            let params_node = inner.next().unwrap();
+            self.parse_params(params_node)
         } else {
             Vec::new()
         };
