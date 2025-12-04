@@ -8,9 +8,9 @@ type NoSearch = fn(&Path) -> Option<String>;
 
 #[derive(Debug, Clone)]
 pub enum Toolchain {
-    GCC,
+    Gcc,
     Clang,
-    MSVC,
+    Msvc,
     Other(String),
 }
 
@@ -19,9 +19,9 @@ impl FromStr for Toolchain {
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         Ok(match value {
-            "gcc" => Toolchain::GCC,
+            "gcc" => Toolchain::Gcc,
             "clang" => Toolchain::Clang,
-            "cl" => Toolchain::MSVC,
+            "cl" => Toolchain::Msvc,
             _ => Toolchain::Other(value.to_string()),
         })
     }
@@ -39,10 +39,10 @@ fn detect_toolchain<SearchFn>(path: &Path, search_fn: Option<SearchFn>) -> Toolc
 where
     SearchFn: for<'a> FnOnce(&'a Path) -> Option<String>,
 {
-    if let Some(search) = search_fn {
-        if let Some(toolchain_str) = search(path) {
-            return Toolchain::from_str(&toolchain_str).unwrap();
-        }
+    if let Some(search) = search_fn
+        && let Some(toolchain_str) = search(path)
+    {
+        return Toolchain::from_str(&toolchain_str).unwrap();
     }
 
     let exe = get_lowercase_exe(path).unwrap_or_default();
@@ -73,11 +73,11 @@ impl Toolchain {
     }
 
     pub const fn is_msvc(&self) -> bool {
-        matches!(self, Toolchain::MSVC)
+        matches!(self, Toolchain::Msvc)
     }
 
     pub const fn is_unix_like(&self) -> bool {
-        matches!(self, Toolchain::GCC | Toolchain::Clang)
+        matches!(self, Toolchain::Gcc | Toolchain::Clang)
     }
 }
 
@@ -105,10 +105,10 @@ impl CompilerOptions {
     pub fn link_libs(mut self, libs: &[impl AsRef<str>]) -> Self {
         for lib in libs {
             match self.toolchain {
-                Toolchain::GCC | Toolchain::Clang => {
+                Toolchain::Gcc | Toolchain::Clang => {
                     self.link_opts.push(format!("-l{}", lib.as_ref()));
                 }
-                Toolchain::MSVC => {
+                Toolchain::Msvc => {
                     self.link_opts.push(format!("{}.lib", lib.as_ref()));
                 }
                 Toolchain::Other(_) => {}
@@ -124,10 +124,10 @@ impl CompilerOptions {
         for p in paths {
             let path: PathBuf = p.into();
             match self.toolchain {
-                Toolchain::GCC | Toolchain::Clang => {
+                Toolchain::Gcc | Toolchain::Clang => {
                     self.link_opts.push(format!("-L{}", path.display()));
                 }
-                Toolchain::MSVC => {
+                Toolchain::Msvc => {
                     self.link_opts.push(format!("/LIBPATH:{}", path.display()));
                 }
                 Toolchain::Other(_) => {}
