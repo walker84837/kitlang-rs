@@ -84,13 +84,11 @@ impl Compiler {
             Vec::new()
         };
 
-        let return_type = if let Some(node) = inner.peek() {
-            if node.as_rule() == Rule::type_annotation {
-                let type_node = inner.next().unwrap();
-                Some(self.parse_type(type_node))
-            } else {
-                None
-            }
+        let return_type = if let Some(node) = inner.peek()
+            && node.as_rule() == Rule::type_annotation
+        {
+            let type_node = inner.next().unwrap();
+            Some(self.parse_type(type_node))
         } else {
             None
         };
@@ -462,7 +460,7 @@ impl Compiler {
             .build();
 
         let mut cmd = Command::new(detected.1.clone());
-        cmd.arg(out_c.clone());
+        cmd.arg(out_c);
 
         if detected.0.is_unix_like() {
             cmd.arg("-o").arg(&exe_name);
