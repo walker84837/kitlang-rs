@@ -5,7 +5,7 @@ use std::{fs, path::PathBuf, process::Command};
 type Error = Box<dyn std::error::Error>;
 
 #[derive(Parser)]
-#[command(name = "kitc", version, about = "kit compiler")]
+#[command(name = "kitc", version, about = "Kit compiler")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -13,72 +13,103 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Just compile to C and object
+    /// Compile a .kit file to an executable
     Compile {
-        /// the `.kit` source file
-        #[arg(short, long)]
+        /// The `.kit` source file
         source: PathBuf,
-    },
-    /// Compile then run the resulting executable
-    Run {
-        /// the `.kit` source file
-        #[arg(short, long)]
-        source: PathBuf,
-    },
-}
 
-impl Commands {
-    #[allow(dead_code)]
-    pub const fn compiles_code(&self) -> bool {
-        matches!(self, Commands::Compile { .. } | Commands::Run { .. })
-    }
+        /// The libraries to link against
+        #[arg(short, long)]
+        libs: Vec<String>,
+
+        /// Compile and immediately run the executable
+        #[arg(long)]
+        run: bool,
+    },
 }
 
 fn main() -> Result<(), Error> {
     env_logger::init();
-    let args = Cli::parse();
+    let Cli { command } = Cli::parse();
 
-    let compile = |source: &PathBuf, run: bool| -> Result<(), String> {
-        compile_and_maybe_run(&source, run).map_err(|e| format!("failed to compile: {e}"))
-    };
-
-    match args.command {
-        // TODO: move out compile_and_maybe_run to something else
-        Commands::Compile { source } => {
-            compile(&source, false)?;
-            println!("→ Successfully compiled!");
-        }
-        Commands::Run { source } => {
-            compile(&source, true)?;
+    match command {
+        Commands::Compile { source, libs, run } => {
+            let exe_path = compile(&source, &libs)?;
+            if run {
+                run_executable(&exe_path)?;
+            } else {
+                println!("→ Successfully compiled!");
+            }
         }
     }
     Ok(())
 }
 
-fn compile_and_maybe_run(source: &PathBuf, run: bool) -> Result<(), String> {
+fn compile(source: &PathBuf, libs: &[String]) -> Result<PathBuf, String> {
     fs::read_to_string(source).map_err(|_| format!("couldn't read {:?}", source))?;
 
     let c_file = source.with_extension("c");
+    let exe_path = source.with_extension("");
 
-    let mut compiler = Compiler::new(vec![source.clone()], &c_file);
+    let mut compiler = Compiler::new(vec![source.clone()], &c_file, libs.to_vec());
 
-    compiler.compile();
+    compiler
+        .compile()
+        .map_err(|e| format!("failed to compile: {e}"))?;
 
-    if run {
-        let exe = c_file
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .expect("invalid filename")
-            .to_string();
+    // TODO: should this information be moved into a separate struct?
+    let compiler_cmd = if cfg!(target_os = "windows") {
+        "cl.exe"
+    } else {
+        "gcc"
+    };
 
-        let status = Command::new(format!("./{}", exe))
-            .status()
-            .expect("failed to launch executable");
+    let mut cmd = Command::new(compiler_cmd);
 
-        if !status.success() {
-            std::process::exit(status.code().unwrap_or(1));
-        }
+    let out_flag = if cfg!(target_os = "windows") {
+        "/Fo"
+    } else {
+        "-o"
+    };
+
+    cmd.arg(&c_file).arg(out_flag).arg(&exe_path);
+
+    let native_flags = translate_compiler_flags(libs);
+    cmd.args(&native_flags);
+
+    let status = cmd
+        .status()
+        .map_err(|e| format!("failed to launch {}: {}", compiler_cmd, e))?;
+
+    if !status.success() {
+        return Err(format!("C compilation failed with {}", compiler_cmd));
     }
 
+    Ok(exe_path)
+}
+
+fn run_executable(exe_path: &PathBuf) -> Result<(), String> {
+    let status = Command::new(exe_path)
+        .status()
+        .map_err(|e| format!("failed to launch executable: {}", e))?;
+
+    if !status.success() {
+        std::process::exit(status.code().unwrap_or(1));
+    }
     Ok(())
+}
+
+fn translate_compiler_flags(libs: &[String]) -> Vec<String> {
+    let mut native_flags = Vec::new();
+    for lib_name in libs {
+        #[cfg(target_os = "windows")]
+        {
+            native_flags.push(format!("{}.lib", lib_name));
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            native_flags.push(format!("-l{}", lib_name));
+        }
+    }
+    native_flags
 }

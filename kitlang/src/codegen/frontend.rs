@@ -27,14 +27,16 @@ pub struct Compiler {
     files: Vec<PathBuf>,
     output: PathBuf,
     includes: Vec<Include>,
+    libs: Vec<String>,
 }
 
 impl Compiler {
-    pub fn new(files: Vec<PathBuf>, output: impl AsRef<Path>) -> Self {
+    pub fn new(files: Vec<PathBuf>, output: impl AsRef<Path>, libs: Vec<String>) -> Self {
         Self {
             files,
             output: output.as_ref().to_path_buf(),
             includes: Vec::new(),
+            libs,
         }
     }
 
@@ -462,8 +464,7 @@ impl Compiler {
             compiler::get_system_compiler().ok_or(CompilationError::ToolchainNotFound)?;
 
         let opts = CompilerOptions::new(CompilerMeta(detected.0.clone(), detected.1.clone()))
-            .link_libs(&["m"])
-            // TODO: make this platform agnostic
+            .link_libs(&self.libs)
             .lib_paths(&["/usr/local/lib"])
             .targets(&[out_c.clone().into_os_string().into_string().unwrap()])
             .build();
