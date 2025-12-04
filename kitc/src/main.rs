@@ -2,6 +2,8 @@ use clap::{Parser, Subcommand};
 use kitlang::codegen::frontend::Compiler;
 use std::{fs, path::PathBuf, process::Command};
 
+type Error = Box<dyn std::error::Error>;
+
 #[derive(Parser)]
 #[command(name = "kitc", version, about = "kit compiler")]
 struct Cli {
@@ -25,23 +27,36 @@ enum Commands {
     },
 }
 
-fn main() {
-    env_logger::init();
-    let args = Cli::parse();
-
-    match args.command {
-        Commands::Compile { source } => {
-            compile_and_maybe_run(&source, false);
-            println!("→ Successfully compiled!");
-        }
-        Commands::Run { source } => {
-            compile_and_maybe_run(&source, true);
-        }
+impl Commands {
+    #[allow(dead_code)]
+    pub const fn compiles_code(&self) -> bool {
+        matches!(self, Commands::Compile { .. } | Commands::Run { .. })
     }
 }
 
-fn compile_and_maybe_run(source: &PathBuf, run: bool) -> Result<(), ()> {
-    let _ = fs::read_to_string(source).unwrap_or_else(|_| panic!("couldn’t read {:?}", source));
+fn main() -> Result<(), Error> {
+    env_logger::init();
+    let args = Cli::parse();
+
+    let compile = |source: &PathBuf, run: bool| -> Result<(), String> {
+        compile_and_maybe_run(&source, run).map_err(|e| format!("failed to compile: {e}"))
+    };
+
+    match args.command {
+        // TODO: move out compile_and_maybe_run to something else
+        Commands::Compile { source } => {
+            compile(&source, false)?;
+            println!("→ Successfully compiled!");
+        }
+        Commands::Run { source } => {
+            compile(&source, true)?;
+        }
+    }
+    Ok(())
+}
+
+fn compile_and_maybe_run(source: &PathBuf, run: bool) -> Result<(), String> {
+    fs::read_to_string(source).map_err(|_| format!("couldn't read {:?}", source))?;
 
     let c_file = source.with_extension("c");
 
@@ -64,5 +79,6 @@ fn compile_and_maybe_run(source: &PathBuf, run: bool) -> Result<(), ()> {
             std::process::exit(status.code().unwrap_or(1));
         }
     }
+
     Ok(())
 }
