@@ -23,10 +23,10 @@ Notable links:
 The following features are planned for the compiler rewrite:
 
 - Basic compiler infrastructure:
-  * [X] (**WIP**) Transpile Kit code to C99 and use the local C compiler for compilation (grammar definition significantly improved)
+  * [ ] Transpile Kit code to C99 and use the local C compiler for compilation
     - [X] Add linking flags for compatibility with C libraries (detected, but arguments not fully wired yet)
     - [ ] Add custom flags configuration for custom or uncommon compiler toolchain
-  * [X] Define comprehensive grammar using `pest.rs`
+    - [ ] Grammar definition virtually the same as the original Haskell's AST
   * [ ] Implement meaningful error messages instead of panics
 
 - Compiler CLI
