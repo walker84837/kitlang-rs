@@ -24,19 +24,35 @@ The following features are planned for the compiler rewrite:
 
 - Basic compiler infrastructure:
   * [ ] Transpile Kit code to C99 and use the local C compiler for compilation
-    - [X] Add linking flags for compatibility with C libraries (detected, but arguments not fully wired yet)
+    - [X] Add linking flags for compatibility with C libraries
     - [ ] Add custom flags configuration for custom or uncommon compiler toolchain
     - [ ] Grammar definition virtually the same as the original Haskell's AST
-  * [ ] Implement meaningful error messages instead of panics
+  * [X] Implement meaningful error messages instead of panics
 
 - Compiler CLI
   * [ ] Introduce a compilation progress bar for improved user experience
   * [ ] Display elapsed compilation time for performance monitoring
 
 - Package manager:
-    - [ ] Cargo-like usage
-    - [ ] Kit projects seem to have a [kit.yaml](https://github.com/bendmorris/krit-kit/blob/master/kit.yaml), which looks like a Cargo.toml
-    - [ ] Documentation generation (inspired from `cargo doc`)
+  * [ ] Cargo-like usage
+  * [ ] Kit projects seem to have a [kit.yaml](https://github.com/bendmorris/krit-kit/blob/master/kit.yaml), which looks like a Cargo.toml
+  * [ ] Documentation generation (inspired from `cargo doc`)
+
+### Advanced Roadmap
+
+Here are some features which may be implemented in the future, after the base compiler infrastructure has been implemented:
+
+- Docs and alternate site:
+  - As the original Kit website seems to be down, there should be a page (`kit.winlogon.org`) to host the landing page
+  - [ ] Add a landing page with examples and documentation
+  - [ ] Add compiler-specific documentation for internals
+  - [ ] Add a blog page with news and updates (later on, if this ever gets popular)
+
+- Exhaustive informative compilation errors
+  - [ ] Add location (line and column)
+  - [ ] Show line snippet where the error occurred
+
+- [ ] Delete the C intermediate file after compilation finished
 
 - Standard library:
   * [ ] Develop a standard library using as much Kit code as possible
