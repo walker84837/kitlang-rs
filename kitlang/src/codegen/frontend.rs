@@ -1,8 +1,11 @@
-use crate::codegen::{
-    compiler::{self, CompilerMeta, CompilerOptions},
-    types::*,
-};
 use crate::{KitParser, Rule};
+use crate::{
+    codegen::{
+        compiler::{self, CompilerMeta, CompilerOptions},
+        types::*,
+    },
+    error::CompilationError,
+};
 use log::debug;
 
 use pest::{Parser, iterators::Pair};
@@ -10,6 +13,8 @@ use pest::{Parser, iterators::Pair};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+type CompileResult<T> = Result<T, CompilationError>;
 
 pub enum Optimizations {
     // Should be handled by the compiler itself
@@ -19,8 +24,8 @@ pub enum Optimizations {
 }
 
 pub struct Compiler {
-    pub files: Vec<PathBuf>,
-    pub output: PathBuf,
+    files: Vec<PathBuf>,
+    output: PathBuf,
     includes: Vec<Include>,
 }
 
@@ -33,13 +38,15 @@ impl Compiler {
         }
     }
 
-    fn parse(&mut self) -> Program {
+    fn parse(&mut self) -> CompileResult<Program> {
         let mut includes = Vec::new();
         let mut functions = Vec::new();
 
         for file in &self.files {
-            let input = std::fs::read_to_string(file).expect("Failed to read file");
-            let pairs = KitParser::parse(Rule::program, &input).expect("Parse failed");
+            let input = std::fs::read_to_string(file).map_err(CompilationError::Io)?;
+
+            let pairs = KitParser::parse(Rule::program, &input)
+                .map_err(|e| CompilationError::ParseError(e.to_string()))?;
 
             for pair in pairs {
                 match pair.as_rule() {
@@ -52,18 +59,19 @@ impl Compiler {
 
         self.includes = includes.clone();
 
-        Program {
+        Ok(Program {
             includes,
             imports: HashSet::new(),
             functions,
-        }
+        })
     }
 
     fn parse_include(&self, pair: Pair<Rule>) -> Include {
         // include = { "include" ~ string ~ ";" }
         let mut inner = pair.into_inner();
         let lit = inner.next().unwrap().as_str();
-        // lit includes the quotes, so strip them:
+
+        // lit includes the quotes, so strip them
         let path = lit[1..lit.len() - 1].to_string();
         Include { path }
     }
@@ -433,8 +441,8 @@ impl Compiler {
         }
     }
 
-    pub fn compile(&mut self) {
-        let prog = self.parse();
+    pub fn compile(&mut self) -> CompileResult<()> {
+        let prog = self.parse()?;
         self.transpile_with_program(prog);
 
         let out_c = if self.output.extension().unwrap_or_default() == "c" {
@@ -452,17 +460,21 @@ impl Compiler {
             .unwrap()
             .to_string();
 
-        let detected = compiler::get_system_compiler().unwrap();
+        let detected =
+            compiler::get_system_compiler().ok_or(CompilationError::ToolchainNotFound)?;
+
         let opts = CompilerOptions::new(CompilerMeta(detected.0.clone(), detected.1.clone()))
             .link_libs(&["m"])
+            // TODO: make this platform agnostic
             .lib_paths(&["/usr/local/lib"])
             .targets(&[out_c.clone().into_os_string().into_string().unwrap()])
             .build();
 
-        let mut cmd = Command::new(detected.1.clone());
+        let mut cmd = Command::new(detected.1);
         cmd.arg(out_c);
 
         if detected.0.is_unix_like() {
+            // gcc -o <exe> <c file>
             cmd.arg("-o").arg(&exe_name);
         } else {
             todo!("Unsupported compiler: {:#?}", detected.0);
@@ -470,11 +482,13 @@ impl Compiler {
 
         cmd.args(&opts.link_opts);
 
-        let output = cmd.output().expect("failed to execute compiler");
+        let output = cmd.output().map_err(CompilationError::Io)?;
         let status = output.status;
 
         if !status.success() {
-            panic!("Compilation failed");
+            return Err(CompilationError::CCompileError(output.stderr));
         }
+
+        Ok(())
     }
 }

@@ -10,6 +10,7 @@ type NoSearch = fn(&Path) -> Option<String>;
 pub enum Toolchain {
     Gcc,
     Clang,
+    // TODO: this should be #[cfg(windows)]
     Msvc,
     Other(String),
 }
@@ -27,7 +28,7 @@ impl FromStr for Toolchain {
     }
 }
 
-fn get_lowercase_exe(path: &Path) -> Option<String> {
+pub fn get_lowercase_exe(path: &Path) -> Option<String> {
     Some(path.file_stem().and_then(|s| s.to_str())?.to_lowercase())
 }
 
