@@ -60,13 +60,37 @@ impl Toolchain {
         if let Ok(env_cc) = env::var("CC")
             && let Ok(path) = which(&env_cc)
         {
-            return Some((detect_toolchain::<NoSearch>(&path, None), path));
+            // Search PATH for known compilers
+            let search_fn = |_: &Path| {
+                let compilers = ["clang", "gcc"];
+
+                // Look through each possible compiler and check if it exists
+                let found = compilers
+                    .iter()
+                    .map(|c| which::which(c))
+                    .find_map(Result::ok);
+
+                // Get the executable name from the path
+                found.as_deref().and_then(get_lowercase_exe)
+            };
+
+            return Some((detect_toolchain(&path, Some(search_fn)), path));
         }
 
-        // Search PATH for known compilers
-        for name in &["gcc", "clang", "cl", "cc"] {
+        let candidates = if cfg!(windows) {
+            &["cl.exe", "clang.exe", "gcc.exe"]
+        } else {
+            &["cc", "clang", "gcc"]
+        };
+
+        for name in candidates {
             if let Ok(path) = which(name) {
-                return Some((detect_toolchain::<NoSearch>(&path, None), path));
+                let toolchain = if cfg!(unix) && *name == "cc" {
+                    resolve_cc_toolchain(&path)
+                } else {
+                    detect_toolchain::<NoSearch>(&path, None)
+                };
+                return Some((toolchain, path));
             }
         }
 
@@ -80,6 +104,15 @@ impl Toolchain {
     pub const fn is_unix_like(&self) -> bool {
         matches!(self, Toolchain::Gcc | Toolchain::Clang)
     }
+}
+
+fn resolve_cc_toolchain(path: &Path) -> Toolchain {
+    if cfg!(unix) && path.ends_with("cc") {
+        if let Ok(real_path) = std::fs::read_link(path) {
+            return detect_toolchain::<NoSearch>(&real_path, None);
+        }
+    }
+    detect_toolchain::<NoSearch>(path, None)
 }
 
 #[derive(Debug, Clone)]
