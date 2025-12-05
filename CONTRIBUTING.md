@@ -1,0 +1,92 @@
+# Contribution Guidelines
+
+We welcome contributions to the `kitlang-rs` project!
+
+To make sure the contribution process goes smoothly, please follow these guidelines. This guide is intended for who have never contributed to this repository before. Its purpose is to familiarize them with the codebase and explain the contribution process.
+
+## Structure
+
+I'll go over this structure briefly to get you up to speed. This project has two packages:
+* `kitlang`: This is the core compiler library. It handles:
+  * Lexing: breaking source code into tokens.
+  * Parsing: Building an AST from tokens using `pest` (grammar defined in [`kitlang/src/grammar/kit.pest`](https://github.com/walker84837/kitlang-rs/blob/main/kitlang/src/grammar/kit.pest)).
+  * Code Generation: Translating the AST into an intermediate representation and then into executable code.
+  * Type Checking, Semantic Analysis, etc. (These are areas that are continually being developed).
+
+* `kitc`: This is the main CLI tool that users interact with. It provides the `kitc` executable, which wraps the functionality of the `kitlang` library to compile `.kit` files. (and maybe initialize Kit projects, like `cargo init`)
+
+## What to do
+
+The README contains a Roadmap section which points at things this project needs help with.
+
+## How to contribute
+
+### Setting up your development environment
+
+To get started, you'll need Rust and Cargo installed. If you don't have them, follow the instructions on the [official Rust website](https://www.rust-lang.org/tools/install).
+
+1.  Fork and clone the repository:
+    ```bash
+    # or you can clone upstream and then change remote
+    git clone https://github.com/your-username/kitlang-rs.git
+    cd kitlang-rs
+    ```
+
+2.  Build the project:
+    ```bash
+    cargo build
+    ```
+    This will build both the `kitlang` library and the `kitc` command-line tool.
+
+### Building and running `kitc`
+
+To build the `kitc` executable:
+
+```bash
+cargo build --bin kitc
+```
+
+You can then run it to compile a Kit file:
+
+```bash
+cargo run -- kitc compile examples/helloworld.kit
+```
+
+### Running tests
+
+Before submitting any changes, please ensure all tests pass:
+
+```bash
+cargo test
+```
+
+### Code style and quality
+
+We maintain a consistent code style and quality throughout the project:
+
+* Formatting: Always format your code with `cargo fmt`.
+  ```bash
+  cargo fmt
+  ```
+
+* Linting: Check your code for common mistakes and unidiomatic Rust with `cargo clippy`.
+  ```bash
+  cargo clippy -- -D warnings
+  ```
+  Please address any warnings reported by Clippy, unless they make the code read worse.
+
+### Implementing new features
+
+When implementing a new feature for the Kit language, please ensure you:
+
+1. Add minimal example code testing the new feature in the `examples/` directory.
+2. Verify that your example compiles correctly using the `kitc` CLI tool.
+3. Add unit tests where feasible to make sure the feature works as expected and prevents regressions.
+
+### Submitting changes (PRs)
+
+1. Fork the repository and create a new branch for your feature or bug fix.
+2. Make your changes, ensuring they adhere to the code style and testing guidelines.
+3. Write clear, concise commit messages (follow [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/)).
+4. Push your branch to your fork and open a pull request against the `main` branch of this repo.
+5. Provide a detailed description of your changes in the pull request, and why they make sense in this repository.
