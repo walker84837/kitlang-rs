@@ -20,7 +20,10 @@ impl FromStr for Toolchain {
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         Ok(match value {
-            "gcc" => Toolchain::Gcc,
+            // TODO: assume it's GCC, but this could also be clang.
+            // This *should* be fine as both take almost the same arguments, but this should be
+            // changed later on.
+            "gcc" | "cc" => Toolchain::Gcc,
             "clang" => Toolchain::Clang,
             "cl" => Toolchain::Msvc,
             _ => Toolchain::Other(value.to_string()),
