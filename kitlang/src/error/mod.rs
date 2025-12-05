@@ -14,6 +14,9 @@ pub enum CompilationError {
     #[error("Failed to find system C toolchain")]
     ToolchainNotFound,
 
+    #[error("Unsupported toolchain: {0}")]
+    UnsupportedToolchain(String),
+
     #[error(transparent)]
     Io(std::io::Error),
 }

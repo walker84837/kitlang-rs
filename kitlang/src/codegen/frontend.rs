@@ -1,7 +1,7 @@
 use crate::{KitParser, Rule};
 use crate::{
     codegen::{
-        compiler::{self, CompilerMeta, CompilerOptions},
+        compiler::{self, CompilerMeta, CompilerOptions, Toolchain},
         types::*,
     },
     error::CompilationError,
@@ -469,14 +469,27 @@ impl Compiler {
             .targets(&[out_c.clone().into_os_string().into_string().unwrap()])
             .build();
 
-        let mut cmd = Command::new(detected.1);
+        let mut cmd = Command::new(&detected.1);
         cmd.arg(out_c);
 
-        if detected.0.is_unix_like() {
-            // gcc -o <exe> <c file>
-            cmd.arg("-o").arg(&exe_name);
+        let exe_name_with_ext = if detected.0.is_msvc() {
+            format!("{}.exe", exe_name)
         } else {
-            todo!("Unsupported compiler: {:#?}", detected.0);
+            exe_name
+        };
+
+        match detected.0 {
+            Toolchain::Gcc | Toolchain::Clang => {
+                cmd.arg("-o").arg(&exe_name_with_ext);
+            }
+            Toolchain::Msvc => {
+                cmd.arg(format!("/Fe:{}", exe_name_with_ext));
+            }
+            Toolchain::Other(_) => {
+                return Err(CompilationError::UnsupportedToolchain(
+                    detected.1.display().to_string(),
+                ));
+            }
         }
 
         cmd.args(&opts.link_opts);
