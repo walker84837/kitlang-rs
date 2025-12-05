@@ -80,11 +80,7 @@ impl Toolchain {
             return Some((detect_toolchain(&path, Some(search_fn)), path));
         }
 
-        let candidates = if cfg!(windows) {
-            &["cl.exe", "clang.exe", "gcc.exe"]
-        } else {
-            &["cc", "clang", "gcc"]
-        };
+        let candidates = &["cc", "clang", "gcc"];
 
         for name in candidates {
             if let Ok(path) = which(name) {

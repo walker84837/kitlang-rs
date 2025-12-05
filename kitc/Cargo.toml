@@ -8,3 +8,4 @@ kitlang = { path = "../kitlang" }
 anyhow = "1.0.98"
 clap = { version = "4.5.38", features = ["derive"] }
 env_logger = "0.11.8"
+which = "8.0.0"

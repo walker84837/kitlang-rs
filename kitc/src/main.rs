@@ -59,7 +59,12 @@ fn compile(source: &PathBuf, libs: &[String]) -> Result<PathBuf, String> {
 
     // TODO: should this information be moved into a separate struct?
     let compiler_cmd = if cfg!(target_os = "windows") {
-        "cl.exe"
+        if let Err(e) = which::which("cl") {
+            eprintln!("couldn't find MSVC compiler: {e}");
+            "gcc"
+        } else {
+            "cl"
+        }
     } else {
         "gcc"
     };
@@ -67,7 +72,14 @@ fn compile(source: &PathBuf, libs: &[String]) -> Result<PathBuf, String> {
     let mut cmd = Command::new(compiler_cmd);
 
     let out_flag = if cfg!(target_os = "windows") {
-        "/Fo"
+        // TODO: fix this horrible code duplication. This is just a test to see what github actions
+        // does
+        if let Err(e) = which::which("cl") {
+            eprintln!("couldn't find MSVC compiler: {e}");
+            "-o"
+        } else {
+            "/Fo"
+        }
     } else {
         "-o"
     };
