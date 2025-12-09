@@ -94,7 +94,10 @@ fn compile(source: &PathBuf, libs: &[String]) -> Result<PathBuf, String> {
         .map_err(|e| format!("failed to launch {}: {}", compiler_cmd, e))?;
 
     if !status.success() {
-        return Err(format!("C compilation failed with {}", compiler_cmd));
+        return Err(format!(
+            "C compilation failed with {}. Command: {:?}",
+            compiler_cmd, cmd
+        ));
     }
 
     Ok(exe_path)
