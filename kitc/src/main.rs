@@ -1,5 +1,6 @@
 use clap::{Parser, Subcommand};
 use kitlang::codegen::frontend::Compiler;
+use std::time;
 use std::{fs, path::PathBuf, process::Command};
 
 type Error = Box<dyn std::error::Error>;
@@ -25,6 +26,10 @@ enum Commands {
         /// Compile and immediately run the executable
         #[arg(long)]
         run: bool,
+
+        /// The output file name
+        #[arg(long)]
+        measure: bool,
     },
 }
 
@@ -33,8 +38,13 @@ fn main() -> Result<(), Error> {
     let Cli { command } = Cli::parse();
 
     match command {
-        Commands::Compile { source, libs, run } => {
-            let exe_path = compile(&source, &libs)?;
+        Commands::Compile {
+            source,
+            libs,
+            run,
+            measure,
+        } => {
+            let exe_path = compile(&source, &libs, measure)?;
             if run {
                 run_executable(&exe_path)?;
             } else {
@@ -45,11 +55,14 @@ fn main() -> Result<(), Error> {
     Ok(())
 }
 
-fn compile(source: &PathBuf, libs: &[String]) -> Result<PathBuf, String> {
+fn compile(source: &PathBuf, libs: &[String], measure: bool) -> Result<PathBuf, String> {
+    let init = time::Instant::now();
     fs::read_to_string(source).map_err(|_| format!("couldn't read {:?}", source))?;
 
     let c_file = source.with_extension("c");
-    let exe_path = source.with_extension("");
+
+    let extension = if cfg!(windows) { "exe" } else { "" };
+    let exe_path = source.with_extension(extension);
 
     let mut compiler = Compiler::new(vec![source.clone()], &c_file, libs.to_vec());
 
@@ -98,6 +111,10 @@ fn compile(source: &PathBuf, libs: &[String]) -> Result<PathBuf, String> {
             "C compilation failed with {}. Command: {:?}",
             compiler_cmd, cmd
         ));
+    }
+
+    if measure {
+        println!("→ Compiled in {}ms", init.elapsed().as_millis());
     }
 
     Ok(exe_path)
