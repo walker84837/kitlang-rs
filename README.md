@@ -31,7 +31,7 @@ The following features are planned for the compiler rewrite:
 
 - Compiler CLI
   * [ ] Introduce a compilation progress bar for improved user experience
-  * [ ] Display elapsed compilation time for performance monitoring
+  * [X] Display elapsed compilation time for performance monitoring
 
 - Package manager:
   * [ ] Cargo-like usage
