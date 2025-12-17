@@ -24,14 +24,11 @@ The following features are planned for the compiler rewrite:
 
 - Basic compiler infrastructure:
   * [ ] Transpile Kit code to C99 and use the local C compiler for compilation
-    - [X] Add linking flags for compatibility with C libraries
     - [ ] Add custom flags configuration for custom or uncommon compiler toolchain
     - [ ] Grammar definition virtually the same as the original Haskell's AST
-  * [X] Implement meaningful error messages instead of panics
 
 - Compiler CLI
   * [ ] Introduce a compilation progress bar for improved user experience
-  * [X] Display elapsed compilation time for performance monitoring
 
 - Package manager:
   * [ ] Cargo-like usage
@@ -57,6 +54,17 @@ Here are some features which may be implemented in the future, after the base co
 - Standard library:
   * [ ] Develop a standard library using as much Kit code as possible
   * [ ] Zero-cost abstractions (if possible)
+
+## Completed Features
+
+The following features have been implemented:
+
+- Basic compiler infrastructure:
+  * Add linking flags for compatibility with C libraries
+  * Implement meaningful error messages instead of panics
+
+- Compiler CLI
+  * Display elapsed compilation time for performance monitoring
 
 ## Licensing
 
