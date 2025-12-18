@@ -115,8 +115,7 @@ impl Compiler {
 
     fn parse_params(&self, pair: Pair<Rule>) -> Vec<Param> {
         // param_list = { param ~ ("," ~ param )* }
-        pair
-            .into_inner()
+        pair.into_inner()
             .filter(|p| p.as_rule() == Rule::param)
             .map(|p| {
                 let mut inner = p.into_inner();
@@ -499,7 +498,7 @@ impl Compiler {
         let detected =
             compiler::get_system_compiler().ok_or(CompilationError::ToolchainNotFound)?;
 
-        let opts = CompilerOptions::new(CompilerMeta(detected.0.clone()))
+        let opts = CompilerOptions::new(CompilerMeta(detected.0))
             .link_libs(&self.libs)
             .lib_paths(&["/usr/local/lib"])
             .targets(&[out_c.clone().into_os_string().into_string().unwrap()])
@@ -518,10 +517,11 @@ impl Compiler {
             Toolchain::Gcc | Toolchain::Clang => {
                 cmd.arg("-o").arg(&exe_name_with_ext);
             }
+            #[cfg(windows)]
             Toolchain::Msvc => {
                 cmd.arg(format!("/Fe:{}", exe_name_with_ext));
             }
-            Toolchain::Other(_) => {
+            Toolchain::Other => {
                 return Err(CompilationError::UnsupportedToolchain(
                     detected.1.display().to_string(),
                 ));

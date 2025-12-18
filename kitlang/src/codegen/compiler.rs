@@ -6,13 +6,13 @@ use which::which;
 
 type NoSearch = fn(&Path) -> Option<String>;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum Toolchain {
     Gcc,
     Clang,
-    // TODO: this should be #[cfg(windows)]
+    #[cfg(windows)]
     Msvc,
-    Other(String),
+    Other,
 }
 
 impl FromStr for Toolchain {
@@ -25,12 +25,39 @@ impl FromStr for Toolchain {
             // changed later on.
             "gcc" | "cc" => Toolchain::Gcc,
             "clang" => Toolchain::Clang,
+            #[cfg(windows)]
             "cl" => Toolchain::Msvc,
-            _ => Toolchain::Other(value.to_string()),
+            _ => Toolchain::Other,
         })
     }
 }
 
+/// Convert a path's file stem to a lowercase `String`.
+///
+/// This attempts to get the file stem (the filename without extension)
+/// from the provided `Path`, convert it to UTF‑8, and return a lowercase
+/// `String`.
+///
+/// If the path has no file stem or the file stem is not valid UTF‑8, this function returns `None`.
+///
+/// # Examples
+///
+/// ```
+/// #use std::path::Path;
+///
+/// assert_eq!(
+///     get_lowercase_exe(Path::new("/foo/Bar.TXT")),
+///     Some("bar".to_string())
+/// );
+///
+/// // No file stem (path ends with `/`)
+/// assert_eq!(get_lowercase_exe(Path::new("/foo/")), None);
+/// ```
+///
+/// # Returns
+///
+/// - `Some(String)` containing the lowercase file stem if present and valid UTF‑8.
+/// - `None` if there is no file stem or it cannot be represented as UTF‑8.
 pub fn get_lowercase_exe(path: &Path) -> Option<String> {
     Some(path.file_stem().and_then(|s| s.to_str())?.to_lowercase())
 }
@@ -68,10 +95,7 @@ impl Toolchain {
                 let compilers = ["clang", "gcc"];
 
                 // Look through each possible compiler and check if it exists
-                let found = compilers
-                    .iter()
-                    .map(|c| which::which(c))
-                    .find_map(Result::ok);
+                let found = compilers.iter().map(which::which).find_map(Result::ok);
 
                 // Get the executable name from the path
                 found.as_deref().and_then(get_lowercase_exe)
@@ -97,7 +121,15 @@ impl Toolchain {
     }
 
     pub const fn is_msvc(&self) -> bool {
-        matches!(self, Toolchain::Msvc)
+        #[cfg(windows)]
+        {
+            matches!(self, Toolchain::Msvc)
+        }
+        #[cfg(not(windows))]
+        {
+            // MSVC isn't on other OSes, so it's always false outside of Windows
+            false
+        }
     }
 
     pub const fn is_unix_like(&self) -> bool {
@@ -105,11 +137,14 @@ impl Toolchain {
     }
 }
 
+/// `cc` is often a symlink to an actual compiler on the system, so
+/// we need to get an actual path to the C compiler.
 fn resolve_cc_toolchain(path: &Path) -> Toolchain {
-    if cfg!(unix) && path.ends_with("cc") {
-        if let Ok(real_path) = std::fs::read_link(path) {
-            return detect_toolchain::<NoSearch>(&real_path, None);
-        }
+    if cfg!(unix)
+        && path.ends_with("cc")
+        && let Ok(real_path) = std::fs::read_link(path)
+    {
+        return detect_toolchain::<NoSearch>(&real_path, None);
     }
     detect_toolchain::<NoSearch>(path, None)
 }
@@ -119,17 +154,15 @@ pub struct CompilerOptions {
     pub toolchain: Toolchain,
     pub target: Vec<PathBuf>,
     pub link_opts: Vec<String>,
-    pub compiler_path: PathBuf,
 }
 
 #[derive(Debug, Clone)]
-pub struct CompilerMeta(pub Toolchain, pub PathBuf);
+pub struct CompilerMeta(pub Toolchain);
 
 impl CompilerOptions {
     pub fn new(base_meta: CompilerMeta) -> Self {
         Self {
             toolchain: base_meta.0,
-            compiler_path: base_meta.1,
             target: Vec::new(),
             link_opts: Vec::new(),
         }
@@ -141,10 +174,11 @@ impl CompilerOptions {
                 Toolchain::Gcc | Toolchain::Clang => {
                     self.link_opts.push(format!("-l{}", lib.as_ref()));
                 }
+                #[cfg(windows)]
                 Toolchain::Msvc => {
                     self.link_opts.push(format!("{}.lib", lib.as_ref()));
                 }
-                Toolchain::Other(_) => {}
+                Toolchain::Other => {}
             }
         }
         self
@@ -160,10 +194,11 @@ impl CompilerOptions {
                 Toolchain::Gcc | Toolchain::Clang => {
                     self.link_opts.push(format!("-L{}", path.display()));
                 }
+                #[cfg(windows)]
                 Toolchain::Msvc => {
                     self.link_opts.push(format!("/LIBPATH:{}", path.display()));
                 }
-                Toolchain::Other(_) => {}
+                Toolchain::Other => {}
             }
         }
         self
