@@ -115,7 +115,7 @@ impl Compiler {
 
     fn parse_params(&self, pair: Pair<Rule>) -> Vec<Param> {
         // param_list = { param ~ ("," ~ param )* }
-        let params = pair
+        pair
             .into_inner()
             .filter(|p| p.as_rule() == Rule::param)
             .map(|p| {
@@ -125,8 +125,7 @@ impl Compiler {
                 let ty = self.parse_type(type_node);
                 Param { name, ty }
             })
-            .collect();
-        params
+            .collect()
     }
 
     fn parse_block(&self, pair: Pair<Rule>) -> Block {
@@ -228,7 +227,6 @@ impl Compiler {
             | Rule::comparison
             | Rule::additive
             | Rule::multiplicative
-            | Rule::unary
             | Rule::bitwise_or
             | Rule::bitwise_xor
             | Rule::bitwise_and
@@ -236,11 +234,37 @@ impl Compiler {
                 let inner = pair.into_inner().next().unwrap();
                 return self.parse_expr(inner);
             }
-            _ => {}
+            _ => { /* Do nothing here, fall through to the next match */ }
         }
 
         // now handle the real terminals
         match pair.as_rule() {
+            Rule::unary => {
+                let mut inner_pairs = pair.into_inner();
+                let first_pair = inner_pairs.next().unwrap();
+
+                match first_pair.as_rule() {
+                    Rule::unary_op => {
+                        let op = match first_pair.as_str() {
+                            "!" => UnaryOperator::Not,
+                            "-" => UnaryOperator::Negate,
+                            "&" => UnaryOperator::AddressOf,
+                            "*" => UnaryOperator::Dereference,
+                            "++" => UnaryOperator::Increment,
+                            "--" => UnaryOperator::Decrement,
+                            "~" => UnaryOperator::BitwiseNot,
+                            _ => unreachable!("Unknown unary operator: {}", first_pair.as_str()),
+                        };
+                        let expr = self.parse_expr(inner_pairs.next().unwrap()); // The remaining is the inner unary/primary expression
+                        Expr::UnaryOp {
+                            op,
+                            expr: Box::new(expr),
+                        }
+                    }
+                    Rule::primary => self.parse_expr(first_pair),
+                    _ => unreachable!("Unexpected rule in unary: {:?}", first_pair.as_rule()),
+                }
+            }
             Rule::identifier => Expr::Identifier(pair.as_str().to_string()),
             Rule::literal => {
                 let s = pair.as_str();
@@ -427,6 +451,18 @@ impl Compiler {
                     .join(", ");
                 format!("{}({})", callee, args_str)
             }
+            Expr::UnaryOp { op, expr } => {
+                let expr_str = self.transpile_expr(expr);
+                match op {
+                    UnaryOperator::Not => format!("!{}", expr_str),
+                    UnaryOperator::Negate => format!("-{}", expr_str),
+                    UnaryOperator::AddressOf => format!("&{}", expr_str),
+                    UnaryOperator::Dereference => format!("*{}", expr_str),
+                    UnaryOperator::Increment => format!("++{}", expr_str),
+                    UnaryOperator::Decrement => format!("--{}", expr_str),
+                    UnaryOperator::BitwiseNot => format!("~{}", expr_str),
+                }
+            }
         }
     }
 
@@ -463,7 +499,7 @@ impl Compiler {
         let detected =
             compiler::get_system_compiler().ok_or(CompilationError::ToolchainNotFound)?;
 
-        let opts = CompilerOptions::new(CompilerMeta(detected.0.clone(), detected.1.clone()))
+        let opts = CompilerOptions::new(CompilerMeta(detected.0.clone()))
             .link_libs(&self.libs)
             .lib_paths(&["/usr/local/lib"])
             .targets(&[out_c.clone().into_os_string().into_string().unwrap()])

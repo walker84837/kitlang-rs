@@ -65,10 +65,22 @@ pub enum Stmt {
 }
 
 #[derive(Debug)]
+pub enum UnaryOperator {
+    Not,         // !
+    Negate,      // -
+    AddressOf,   // &
+    Dereference, // *
+    Increment,   // ++ (prefix)
+    Decrement,   // -- (prefix)
+    BitwiseNot,  // ~
+}
+
+#[derive(Debug)]
 pub enum Expr {
     Identifier(String),
     Literal(Literal),
     Call { callee: String, args: Vec<Expr> },
+    UnaryOp { op: UnaryOperator, expr: Box<Expr> },
 }
 
 #[derive(Debug)]

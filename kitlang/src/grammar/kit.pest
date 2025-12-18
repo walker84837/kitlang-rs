@@ -105,7 +105,8 @@ bitwise_and = { shift ~ ("&" ~ shift)* }
 shift = { additive ~ (("<<" | ">>") ~ additive)* }
 additive = { multiplicative ~ (("+" | "-") ~ multiplicative)* }
 multiplicative = { unary ~ (("*" | "/" | "%") ~ unary)* }
-unary = { ("!" | "-" | "&" | "*" | "++" | "--" | "~")* ~ primary }
+unary_op = { "!" | "-" | "&" | "*" | "++" | "--" | "~" }
+unary = { (unary_op ~ unary) | primary }
 primary = {
     function_call_expr |
     array_literal |

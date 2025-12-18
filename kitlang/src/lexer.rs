@@ -94,6 +94,8 @@ pub enum Token {
     Dot,
     #[token("=")]
     Equals,
+    #[token("~")]
+    Tilde,
 
     #[regex(r#""([^"\\]|\\.)*""#, |lex| {
         let s = lex.slice();
