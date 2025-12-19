@@ -17,7 +17,9 @@ I'll go over this structure briefly to get you up to speed. This project has two
 
 ## What to do
 
-The README contains a Roadmap section which points at things this project needs help with. If you have any questions on where you could start, please file an issue. I'm happy to provide any further information you need.
+The README contains a Roadmap section which points at things this project needs help with.
+
+If you have any questions on where you could start, please file an issue, even if you need to ask a question you think is "stupid". I'm happy to provide any further information you need.
 
 ## How to contribute
 
@@ -85,11 +87,11 @@ When implementing a new feature for the Kit language, please ensure you:
 
 ### Submitting changes (PRs)
 
-1. Fork the repository and create a new branch for your feature or bug fix.
-2. Make your changes, ensuring they adhere to the code style and testing guidelines.
-3. Write clear, concise commit messages (please follow [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/)).
-4. Push your branch to your fork and open a pull request against the `main` branch of this repo.
-5. Provide a detailed description of your changes in the pull request, and why they make sense in the context of this repository.
+1. **Fork the repository** and **create a new branch** for your feature or bug fix.
+2. **Make your changes**, ensuring they adhere to the code style and testing guidelines.
+3. **Write clear, concise commit messages** (preferably following [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/)). If you're unfamiliar with Conventional Commits, don't worry--I won't reject your PR over it.
+4. **Push your branch to your fork** and **open a pull request** against the `main` branch of this repo.
+5. **Provide a detailed description** of your changes **in the pull request**, and why they make sense in the context of this repository.
 
 ## FAQs
 
@@ -105,3 +107,6 @@ When implementing a new feature for the Kit language, please ensure you:
 
 3. When is it appropriate to follow up?
    I check my GitHub inbox fairly often in my free time. If by the day after you haven't heard from me, feel free to ping me.
+
+4. Do you need to know about compilers to contribute?
+   Not at all. I also appreciate contributions that aren't just about compiler work: it can be writing error messages, or adding example Kit programs. You name it!
