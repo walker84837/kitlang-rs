@@ -96,7 +96,7 @@ When implementing a new feature for the Kit language, please ensure you:
 ## FAQs
 
 1. **When do my changes (or issues) get reviewed?**
-   Because for now, this is a single-person project, so I don't have all day to review PRs and issues. This means that I may not respond *immediately*, but it will be reviewed within a few hours to a day after.
+   Since I'm the sole maintainer, I don't have all day to review PRs and issues. This means that I may not respond *immediately*, but it will be reviewed within a few hours to a day after.
 
 2. **What types of contributions are accepted?**
    I accept mainly:
