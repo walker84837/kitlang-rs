@@ -95,18 +95,18 @@ When implementing a new feature for the Kit language, please ensure you:
 
 ## FAQs
 
-1. When do my changes (or issues) get reviewed?
+1. **When do my changes (or issues) get reviewed?**
    Because for now, this is a single-person project, so I don't have all day to review PRs and issues. This means that I may not respond *immediately*, but it will be reviewed within a few hours to a day after.
 
-2. What types of contributions are accepted?
+2. **What types of contributions are accepted?**
    I accept mainly:
    * bug fixes
    * features (i.e. new functionality, grammar implementations, etc.)
    * documentation updates
    Basically any, as long as they make sense in the context of the project.
 
-3. When is it appropriate to follow up?
+3. **When is it appropriate to follow up?**
    I check my GitHub inbox fairly often in my free time. If by the day after you haven't heard from me, feel free to ping me.
 
-4. Do you need to know about compilers to contribute?
+4. **Do you need to know about compilers to contribute?**
    Not at all. I also appreciate contributions that aren't just about compiler work: it can be writing error messages, or adding example Kit programs. You name it!
