@@ -2,7 +2,7 @@
 
 kitlang-rs is an experimental Rust port of the [Kit compiler](https://github.com/kitlang/kit)[^1], aiming to bring the Kit programming language to the Rust ecosystem.
 
-We have a website at <https://www.kitlang.dev> (clone of <https://github.com/kitlang/kitlang.github.io>) as the original site's [down](https://github.com/kitlang/kit/issues/157). It will serve as this compiler's site.
+We have a website at <https://www.kitlang.dev>[^2].
 
 ## Motivation
 
@@ -43,8 +43,8 @@ The following features are planned for the compiler rewrite:
 Here are some features which may be implemented in the future, after the base compiler infrastructure has been implemented:
 
 - Docs and alternate site:
-  - As the original Kit website seems to be down, there should be a page (`kit.winlogon.org`) to host the landing page
-  - [ ] Add a landing page with examples and documentation
+  - As the original Kit website seems to be down, there should be a page ~~(`kit.winlogon.org`)~~ kitlang.dev to host the landing page
+  - [X] Add a landing page with examples and documentation
   - [ ] Add compiler-specific documentation for internals
   - [ ] Add a blog page with news and updates (later on, if this ever gets popular)
 
@@ -76,3 +76,4 @@ kitlang-rs is dual-licensed under the [Apache License, Version 2.0](LICENSE-APAC
 **DISCLAIMER**: This project is entirely independent of the original [Kit compiler](https://github.com/kitlang/kit) and is not affiliated with the original developers.
 
 [^1]: If you want to be more pedantic, the more correct wording is *transpiler* as it outputs C source code, not machine code.
+[^2]: The site is a clone of <https://github.com/kitlang/kitlang.github.io>) as the original site's [down](https://github.com/kitlang/kit/issues/157).
