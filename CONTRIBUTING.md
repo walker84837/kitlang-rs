@@ -17,7 +17,7 @@ I'll go over this structure briefly to get you up to speed. This project has two
 
 ## What to do
 
-The README contains a Roadmap section which points at things this project needs help with.
+The README contains a Roadmap section which points at things this project needs help with. If you have any questions on where you could start, please file an issue. I'm happy to provide any further information you need.
 
 ## How to contribute
 
@@ -87,6 +87,21 @@ When implementing a new feature for the Kit language, please ensure you:
 
 1. Fork the repository and create a new branch for your feature or bug fix.
 2. Make your changes, ensuring they adhere to the code style and testing guidelines.
-3. Write clear, concise commit messages (follow [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/)).
+3. Write clear, concise commit messages (please follow [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/)).
 4. Push your branch to your fork and open a pull request against the `main` branch of this repo.
-5. Provide a detailed description of your changes in the pull request, and why they make sense in this repository.
+5. Provide a detailed description of your changes in the pull request, and why they make sense in the context of this repository.
+
+## FAQs
+
+1. When do my changes (or issues) get reviewed?
+   Because for now, this is a single-person project, so I don't have all day to review PRs and issues. This means that I may not respond *immediately*, but it will be reviewed within a few hours to a day after.
+
+2. What types of contributions are accepted?
+   I accept mainly:
+   * bug fixes
+   * features (i.e. new functionality, grammar implementations, etc.)
+   * documentation updates
+   Basically any, as long as they make sense in the context of the project.
+
+3. When is it appropriate to follow up?
+   I check my GitHub inbox fairly often in my free time. If by the day after you haven't heard from me, feel free to ping me.

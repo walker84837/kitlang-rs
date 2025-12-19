@@ -2,6 +2,8 @@
 
 kitlang-rs is an experimental Rust port of the [Kit compiler](https://github.com/kitlang/kit)[^1], aiming to bring the Kit programming language to the Rust ecosystem.
 
+We have a website at <https://www.kitlang.dev> (clone of <https://github.com/kitlang/kitlang.github.io>) as the original site's [down](https://github.com/kitlang/kit/issues/157). It will serve as this compiler's site.
+
 ## Motivation
 
 While the original Kit compiler is written in Haskell, this project was initiated to create a Rust-based alternative. The reasons for not contributing to the original Kit compiler are:
@@ -26,6 +28,7 @@ The following features are planned for the compiler rewrite:
   * [ ] Transpile Kit code to C99 and use the local C compiler for compilation
     - [ ] Add custom flags configuration for custom or uncommon compiler toolchain
     - [ ] Grammar definition virtually the same as the original Haskell's AST
+  * [ ] Unit testing with examples in [`examples/`](examples/)
 
 - Compiler CLI
   * [ ] Introduce a compilation progress bar for improved user experience
