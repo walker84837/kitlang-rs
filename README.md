@@ -28,7 +28,7 @@ The following features are planned for the compiler rewrite:
   * [ ] Transpile Kit code to C99 and use the local C compiler for compilation
     - [ ] Add custom flags configuration for custom or uncommon compiler toolchain
     - [ ] Grammar definition virtually the same as the original Haskell's AST
-  * [ ] Unit testing with examples in [`examples/`](examples/)
+  * [X] Unit testing with examples in [`examples/`](examples/)
 
 - Compiler CLI
   * [ ] Introduce a compilation progress bar for improved user experience
