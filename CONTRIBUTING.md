@@ -4,6 +4,19 @@ We welcome contributions to the `kitlang-rs` project!
 
 To make sure the contribution process goes smoothly, please follow these guidelines. This guide is intended for who have never contributed to this repository before. Its purpose is to familiarize them with the codebase and explain the contribution process.
 
+## Table of Contents
+
+- [Structure](#structure)
+- [What to do](#what-to-do)
+  * [Good First Issues](#good-first-issues)
+- [How to contribute](#how-to-contribute)
+  * [Setting up your development environment](#setting-up-your-development-environment)
+  * [Building and running `kitc`](#building-and-running-kitc)
+  * [Running tests](#running-tests)
+  * [Code style and quality](#code-style-and-quality)
+  * [Implementing new features](#implementing-new-features)
+  * [Submitting changes (PRs)](#submitting-changes-prs)
+- [FAQs](#faqs)
 ## Structure
 
 I'll go over this structure briefly to get you up to speed. This project has two packages:
@@ -17,9 +30,15 @@ I'll go over this structure briefly to get you up to speed. This project has two
 
 ## What to do
 
-The README contains a Roadmap section which points at things this project needs help with.
+If you're looking for a good place to start, check out:
+- the **"Good First Issues"** section below;
+- the **README's Roadmap** section which points at things this project needs help with.
 
 If you have any questions on where you could start, please file an issue, even if you need to ask a question you think is "stupid". I'm happy to provide any further information you need.
+
+### Good First Issues
+
+If you're looking for a simple way to get started, we label issues that are suitable for beginners with ["good first issue"](https://github.com/walker84837/kitlang-rs/labels/good%20first%20issue).
 
 ## How to contribute
 

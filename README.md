@@ -20,6 +20,32 @@ Notable links:
   - [Section in examples page](https://web.archive.org/web/20250319015229/https://www.kitlang.org/examples.html#standard-library)
   - [Original implementation](https://github.com/kitlang/kit/tree/dev/std)
 
+## Quick Start
+
+Here's a simple "Hello World!" example in Kit:
+
+```kit
+include "stdio.h";
+
+function main() {
+    var s: CString = "Hello from Kit!";
+    printf("%s\n", s);
+}
+```
+
+To compile and run this, save it as `hello.kit` and then execute:
+
+```bash
+cargo run --bin kitc compile hello.kit
+./hello
+```
+
+Expected output:
+
+```
+Hello from Kit!
+```
+
 ## Roadmap
 
 The following features are planned for the compiler rewrite:
