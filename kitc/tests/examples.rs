@@ -10,17 +10,33 @@ fn setup_logging() {
     });
 }
 
+const MANIFEST_DIR: &str = env!("CARGO_MANIFEST_DIR");
+
 fn run_example_test(
     example_name: &str,
     stdin: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     setup_logging();
-    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-    let workspace_root = Path::new(&manifest_dir).parent().unwrap();
 
-    let examples_dir = Path::new("examples");
+    let workspace_root = Path::new(MANIFEST_DIR)
+        .parent()
+        .ok_or("couldn't get workspace root")?;
+
+    let examples_dir = workspace_root.join("examples");
     let example_file = examples_dir.join(format!("{}.kit", example_name));
     let expected_file = examples_dir.join(format!("{}.kit.expected", example_name));
+
+    assert!(
+        example_file.exists(),
+        "example file {} does not exist",
+        example_file.display()
+    );
+
+    assert!(
+        expected_file.exists(),
+        "expected file {} does not exist",
+        expected_file.display()
+    );
 
     log::info!(
         "Running example {} in {} (path: {}). Expected file is at {}",
@@ -50,9 +66,9 @@ fn run_example_test(
         compiled_cmd.write_stdin(stdin_data);
     }
 
-    let asjdlksaj = workspace_root.join(expected_file);
-    log::info!("Expected output: {}", asjdlksaj.display());
-    let expected_output = std::fs::read_to_string(asjdlksaj)?;
+    let expected_output_path = workspace_root.join(expected_file);
+    log::info!("Expected output: {}", expected_output_path.display());
+    let expected_output = std::fs::read_to_string(expected_output_path)?;
 
     // Assert the output
     compiled_cmd

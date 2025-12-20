@@ -14,6 +14,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    // TODO: the compiler artifacts should be deleted as soon as the final C program has been
+    // successfully compiled. There should be a flag to disable this behavior.
     /// Compile a .kit file to an executable
     Compile {
         /// The `.kit` source file
@@ -35,6 +37,8 @@ enum Commands {
 
 fn main() -> Result<(), Error> {
     env_logger::init();
+
+    // Destructure the Cli to get the `command` field
     let Cli { command } = Cli::parse();
 
     match command {
@@ -119,6 +123,8 @@ fn compile(source: &PathBuf, libs: &[String], measure: bool) -> Result<PathBuf, 
     Ok(exe_path)
 }
 
+// TODO: return the exit status from the compiler code, and return Err() if it failed, probably
+// adding an exit status (to exit with).
 fn run_executable(exe_path: &PathBuf) -> Result<(), String> {
     let status = Command::new(exe_path)
         .status()
@@ -130,7 +136,7 @@ fn run_executable(exe_path: &PathBuf) -> Result<(), String> {
     Ok(())
 }
 
-// TODO: same thing here. This should be replaced with `kitlang`'s `Toolchain` API to properly
+// TODO: same thing here: this should be replaced with `kitlang`'s `Toolchain` API to properly
 // translate flags.
 fn translate_compiler_flags(libs: &[String]) -> Vec<String> {
     let mut native_flags = Vec::new();
