@@ -1,4 +1,4 @@
-use assert_cmd::{cargo::*, Command as AssertCommand};
+use assert_cmd::{Command as AssertCommand, cargo::*};
 use predicates::prelude::*;
 use std::{path::Path, process::Command};
 
@@ -9,8 +9,9 @@ fn run_example_test(
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
     let workspace_root = Path::new(&manifest_dir).parent().unwrap();
 
-    let example_file = format!("examples/{}.kit", example_name);
-    let expected_file = format!("examples/{}.kit.expected", example_name);
+    let examples_dir = Path::new("examples");
+    let example_file = examples_dir.join(format!("{}.kit", example_name));
+    let expected_file = examples_dir.join(format!("{}.kit.expected", example_name));
 
     let source_path = workspace_root.join(example_file);
     let c_path = source_path.with_extension("c");
