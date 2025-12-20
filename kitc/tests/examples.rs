@@ -1,11 +1,20 @@
 use assert_cmd::{Command as AssertCommand, cargo::*};
 use predicates::prelude::*;
-use std::{path::Path, process::Command};
+use std::{path::Path, process::Command, sync::OnceLock};
+
+static LOGGER_INIT: OnceLock<()> = OnceLock::new();
+
+fn setup_logging() {
+    LOGGER_INIT.get_or_init(|| {
+        env_logger::builder().is_test(true).init();
+    });
+}
 
 fn run_example_test(
     example_name: &str,
     stdin: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    setup_logging();
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
     let workspace_root = Path::new(&manifest_dir).parent().unwrap();
 
@@ -13,12 +22,22 @@ fn run_example_test(
     let example_file = examples_dir.join(format!("{}.kit", example_name));
     let expected_file = examples_dir.join(format!("{}.kit.expected", example_name));
 
+    log::info!(
+        "Running example {} in {} (path: {}). Expected file is at {}",
+        example_name,
+        workspace_root.display(),
+        example_file.display(),
+        expected_file.display()
+    );
+
     let source_path = workspace_root.join(example_file);
     let c_path = source_path.with_extension("c");
     let executable_path = source_path.with_extension("");
 
     // Compile the example
-    let mut cmd = AssertCommand::from_std(Command::new(cargo_bin!("kitc")));
+    let kitc = cargo_bin!("kitc");
+    log::info!("kitc path: {}", kitc.display());
+    let mut cmd = AssertCommand::from_std(Command::new(kitc));
 
     // Run from workspace root
     cmd.current_dir(workspace_root);
@@ -31,7 +50,9 @@ fn run_example_test(
         compiled_cmd.write_stdin(stdin_data);
     }
 
-    let expected_output = std::fs::read_to_string(workspace_root.join(expected_file))?;
+    let asjdlksaj = workspace_root.join(expected_file);
+    log::info!("Expected output: {}", asjdlksaj.display());
+    let expected_output = std::fs::read_to_string(asjdlksaj)?;
 
     // Assert the output
     compiled_cmd
@@ -40,11 +61,16 @@ fn run_example_test(
         .success();
 
     // Clean up the executable and .c file
-    std::fs::remove_file(&executable_path)?;
-    std::fs::remove_file(&c_path)?;
+    if let Err(err) = std::fs::remove_file(&executable_path) {
+        log::error!("Failed to remove executable: {err}");
+    }
+    if let Err(err) = std::fs::remove_file(&c_path) {
+        log::error!("Failed to remove C source file: {err}");
+    }
 
     Ok(())
 }
+
 
 #[test]
 fn test_helloworld() -> Result<(), Box<dyn std::error::Error>> {
