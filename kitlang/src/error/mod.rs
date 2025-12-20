@@ -14,6 +14,9 @@ pub enum CompilationError {
     #[error("Failed to find system C toolchain")]
     ToolchainNotFound,
 
+    #[error("Invalid output path")]
+    InvalidOutputPath,
+
     #[error("Unsupported toolchain: {0}")]
     UnsupportedToolchain(String),
 

@@ -80,7 +80,7 @@ impl Compiler {
             for pair in pairs {
                 match pair.as_rule() {
                     Rule::include_stmt => includes.push(self.parse_include(pair)),
-                    Rule::function_decl => functions.push(self.parse_function(pair)),
+                    Rule::function_decl => functions.push(self.parse_function(pair)?), // Propagate error
                     _ => {}
                 }
             }
@@ -98,6 +98,7 @@ impl Compiler {
     fn parse_include(&self, pair: Pair<Rule>) -> Include {
         // include_stmt = { "include" ~ string ~ ("=>" ~ string)? ~ ";" }
         let mut inner = pair.into_inner();
+        // SAFETY: Grammar guarantees at least one child (the string literal)
         let lit = inner.next().unwrap().as_str();
 
         // lit includes the quotes, so strip them
@@ -105,9 +106,10 @@ impl Compiler {
         Include { path }
     }
 
-    fn parse_function(&self, pair: Pair<Rule>) -> Function {
+    fn parse_function(&self, pair: Pair<Rule>) -> CompileResult<Function> {
         let mut inner = pair.into_inner();
 
+        // SAFETY: Grammar guarantees function name exists as first child
         let name = inner.next().unwrap().as_str().to_string();
 
         let mut params: Vec<Param> = Vec::new();
@@ -118,13 +120,13 @@ impl Compiler {
         for node in inner {
             match node.as_rule() {
                 Rule::params => {
-                    params = self.parse_params(node);
+                    params = self.parse_params(node)?;
                 }
                 Rule::type_annotation => {
-                    return_type = Some(self.parse_type(node));
+                    return_type = Some(self.parse_type(node)?);
                 }
                 Rule::block => {
-                    body = self.parse_block(node);
+                    body = self.parse_block(node)?;
                 }
                 _ => {
                     // skip punctuation/other tokens
@@ -132,49 +134,53 @@ impl Compiler {
             }
         }
 
-        Function {
+        Ok(Function {
             name,
             params,
             return_type,
             body,
-        }
+        })
     }
 
-    fn parse_params(&self, pair: Pair<Rule>) -> Vec<Param> {
+    fn parse_params(&self, pair: Pair<Rule>) -> CompileResult<Vec<Param>> {
         // param_list = { param ~ ("," ~ param )* }
         pair.into_inner()
             .filter(|p: &Pair<Rule>| p.as_rule() == Rule::param)
             .map(|p: Pair<Rule>| {
                 let mut inner = p.into_inner();
+                // SAFETY: Grammar guarantees param has identifier and type
                 let name = inner.next().unwrap().as_str().to_string();
                 let type_node = inner.next().unwrap();
-                let ty = self.parse_type(type_node);
-                Param { name, ty }
+                let ty = self.parse_type(type_node)?;
+                Ok(Param { name, ty })
             })
             .collect()
     }
 
-    fn parse_block(&self, pair: Pair<Rule>) -> Block {
+    fn parse_block(&self, pair: Pair<Rule>) -> CompileResult<Block> {
         // block = { "{" ~ (statement)* ~ "}" }
         let stmts = pair
             .into_inner()
             // grammar gives us a wrapper Rule::statement
             .filter(|p: &Pair<Rule>| p.as_rule() == Rule::statement)
             .map(|stmt_pair: Pair<Rule>| {
-                // unwrap the single child inside statement
+                // SAFETY: Grammar guarantees exactly one child in statement wrapper
                 let inner = stmt_pair.into_inner().next().unwrap();
                 match inner.as_rule() {
                     Rule::var_decl => self.parse_var_decl(inner),
                     Rule::expr_stmt => self.parse_expr_stmt(inner),
                     Rule::return_stmt => self.parse_return(inner),
-                    other => unreachable!("unexpected statement: {:?}", other),
+                    other => Err(CompilationError::ParseError(format!(
+                        "unexpected statement: {:?}",
+                        other
+                    ))),
                 }
             })
-            .collect();
-        Block { stmts }
+            .collect::<Result<_, _>>()?; // Collect and propagate errors
+        Ok(Block { stmts })
     }
 
-    fn parse_var_decl(&self, pair: Pair<Rule>) -> Stmt {
+    fn parse_var_decl(&self, pair: Pair<Rule>) -> CompileResult<Stmt> {
         // var_decl = { ("var"|"const") ~ ident ~ (":" ~ type_annotation)? ~ ("=" ~ expr)? ~ ";" }
         let mut name: Option<String> = None;
         let mut ty: Option<Type> = None;
@@ -188,22 +194,24 @@ impl Compiler {
                 }
                 Rule::type_annotation => {
                     // e.g. ": CString"
-                    ty = Some(self.parse_type(child));
+                    ty = Some(self.parse_type(child)?);
                 }
                 Rule::expr => {
-                    init = Some(self.parse_expr(child));
+                    init = Some(self.parse_expr(child)?);
                 }
                 _ => { /* skip punctuation and the 'var'/'const' keyword */ }
             }
         }
 
-        // name must be present
-        let name = name.expect("var_decl missing identifier");
-        Stmt::VarDecl { name, ty, init }
+        let name = name.ok_or(CompilationError::ParseError(
+            "var_decl missing identifier".to_string(),
+        ))?;
+        Ok(Stmt::VarDecl { name, ty, init })
     }
 
-    fn parse_type(&self, pair: Pair<Rule>) -> Type {
+    fn parse_type(&self, pair: Pair<Rule>) -> CompileResult<Type> {
         let mut inner = pair.into_inner();
+        // SAFETY: Grammar guarantees at least base type exists
         let base = inner.next().unwrap().as_str().trim();
         // turn known names into their enum cases
         let mut ty = Type::from_kit(base);
@@ -211,31 +219,34 @@ impl Compiler {
         // if there are array or pointer annotations, handle here…
         for sub in inner {
             // you can extend to multi-dimensional or pointer types
-            let inner_ty = self.parse_type(sub);
+            let inner_ty = self.parse_type(sub)?;
             ty = Type::Ptr(Box::new(inner_ty));
         }
-        ty
+        Ok(ty)
     }
 
     fn transpile_with_program(&mut self, prog: Program) {
         let c_code = self.generate_c_code(prog);
-        std::fs::write(&self.output, c_code).expect("Failed to write output");
+        if let Err(e) = std::fs::write(&self.output, c_code) {
+            panic!("Failed to write output: {}", e);
+        }
     }
 
-    fn parse_expr_stmt(&self, pair: Pair<Rule>) -> Stmt {
+    fn parse_expr_stmt(&self, pair: Pair<Rule>) -> CompileResult<Stmt> {
         // expr_stmt = { expr ~ ";" }
+        // SAFETY: Grammar guarantees expression exists as first child
         let expr_pair = pair.into_inner().next().unwrap();
-        Stmt::Expr(self.parse_expr(expr_pair))
+        Ok(Stmt::Expr(self.parse_expr(expr_pair)?))
     }
 
-    fn parse_return(&self, pair: Pair<Rule>) -> Stmt {
+    fn parse_return(&self, pair: Pair<Rule>) -> CompileResult<Stmt> {
         // return_stmt = { "return" ~ expr? ~ ";" }
         let mut inner = pair.into_inner();
-        let expr = inner.next().map(|p| self.parse_expr(p));
-        Stmt::Return(expr)
+        let expr = inner.next().map(|p| self.parse_expr(p)).transpose()?;
+        Ok(Stmt::Return(expr))
     }
 
-    fn parse_expr(&self, pair: Pair<Rule>) -> Expr {
+    fn parse_expr(&self, pair: Pair<Rule>) -> CompileResult<Expr> {
         // first, peel off any of the wrapper rules:
         match pair.as_rule() {
             Rule::expr
@@ -250,6 +261,7 @@ impl Compiler {
             | Rule::bitwise_xor
             | Rule::bitwise_and
             | Rule::shift => {
+                // SAFETY: Grammar guarantees exactly one child for wrapper rules
                 let inner = pair.into_inner().next().unwrap();
                 return self.parse_expr(inner);
             }
@@ -260,77 +272,109 @@ impl Compiler {
         match pair.as_rule() {
             Rule::unary => {
                 let mut inner_pairs = pair.into_inner();
+                // SAFETY: Unary rule always has at least one child
                 let first_pair = inner_pairs.next().unwrap();
 
                 match first_pair.as_rule() {
                     Rule::unary_op => {
-                        let first_pair = first_pair.as_str();
-                        let op =
-                            UnaryOperator::from_str(first_pair).expect("invalid unary operation");
+                        let op_str = first_pair.as_str();
+                        let op = UnaryOperator::from_str(op_str).map_err(|_| {
+                            CompilationError::ParseError(format!(
+                                "invalid unary operation: {}",
+                                op_str
+                            ))
+                        })?;
 
-                        let expr = self.parse_expr(inner_pairs.next().unwrap()); // The remaining is the inner unary/primary expression
-                        Expr::UnaryOp {
+                        // SAFETY: Grammar guarantees expression after unary op
+                        let expr = self.parse_expr(inner_pairs.next().unwrap())?;
+                        Ok(Expr::UnaryOp {
                             op,
                             expr: Box::new(expr),
-                        }
+                        })
                     }
                     Rule::primary => self.parse_expr(first_pair),
-                    _ => unreachable!("Unexpected rule in unary: {:?}", first_pair.as_rule()),
+                    other => Err(CompilationError::ParseError(format!(
+                        "Unexpected rule in unary: {:?}",
+                        other
+                    ))),
                 }
             }
-            Rule::identifier => Expr::Identifier(pair.as_str().to_string()),
+            Rule::identifier => Ok(Expr::Identifier(pair.as_str().to_string())),
             Rule::literal => {
+                // SAFETY: Grammar guarantees exactly one child in literal
                 let inner = pair.into_inner().next().unwrap();
                 match inner.as_rule() {
                     Rule::number => {
+                        // SAFETY: Number always has exactly one child (integer/float)
                         let num_pair = inner.into_inner().next().unwrap();
                         match num_pair.as_rule() {
                             Rule::integer => {
-                                let i = num_pair
-                                    .as_str()
-                                    .parse::<i64>()
-                                    .expect("invalid int literal");
-                                Expr::Literal(Literal::Int(i))
+                                let s = num_pair.as_str();
+                                let i = s.parse::<i64>().map_err(|e| {
+                                    CompilationError::ParseError(format!(
+                                        "invalid integer literal '{}': {}",
+                                        s, e
+                                    ))
+                                })?;
+                                Ok(Expr::Literal(Literal::Int(i)))
                             }
                             Rule::float => {
-                                let f = num_pair
-                                    .as_str()
-                                    .parse::<f64>()
-                                    .expect("invalid float literal");
-                                Expr::Literal(Literal::Float(f))
+                                let s = num_pair.as_str();
+                                let f = s.parse::<f64>().map_err(|e| {
+                                    CompilationError::ParseError(format!(
+                                        "invalid float literal '{}': {}",
+                                        s, e
+                                    ))
+                                })?;
+                                Ok(Expr::Literal(Literal::Float(f)))
                             }
-                            _ => unreachable!(),
+                            _ => Err(CompilationError::ParseError(
+                                "Unexpected number type".to_string(),
+                            )),
                         }
                     }
                     Rule::boolean => match inner.as_str() {
-                        "true" => Expr::Literal(Literal::Bool(true)),
-                        "false" => Expr::Literal(Literal::Bool(false)),
-                        _ => unreachable!(),
+                        "true" => Ok(Expr::Literal(Literal::Bool(true))),
+                        "false" => Ok(Expr::Literal(Literal::Bool(false))),
+                        s => Err(CompilationError::ParseError(format!(
+                            "invalid boolean literal: {}",
+                            s
+                        ))),
                     },
-                    Rule::char_literal => todo!("char literal parsing"),
-                    _ => unreachable!(),
+                    Rule::char_literal => Err(CompilationError::ParseError(
+                        "char literal parsing not implemented".to_string(),
+                    )),
+                    _ => Err(CompilationError::ParseError(format!(
+                        "Unexpected literal type: {:?}",
+                        inner.as_rule()
+                    ))),
                 }
             }
             Rule::string => {
                 let full = pair.as_str();
                 let inner = &full[1..full.len() - 1];
                 // let unescaped = unescape(inner).unwrap_or_else(|| inner.to_string());
-                Expr::Literal(Literal::String(inner.to_string()))
+                Ok(Expr::Literal(Literal::String(inner.to_string())))
             }
             Rule::function_call_expr => {
                 let mut inner = pair.into_inner();
+                // SAFETY: Grammar guarantees callee identifier exists
                 let callee = inner.next().unwrap().as_str().to_string();
                 let args = inner
                     .filter(|p: &Pair<Rule>| p.as_rule() == Rule::expr)
                     .map(|p: Pair<Rule>| self.parse_expr(p))
-                    .collect();
-                Expr::Call { callee, args }
+                    .collect::<Result<Vec<_>, _>>()?; // Collect and propagate errors
+                Ok(Expr::Call { callee, args })
             }
             Rule::primary => {
+                // SAFETY: Primary rule always has exactly one child
                 let inner = pair.into_inner().next().unwrap();
                 self.parse_expr(inner)
             }
-            other => panic!("Unexpected expr rule: {:?}", other),
+            other => Err(CompilationError::ParseError(format!(
+                "Unexpected expr rule: {:?}",
+                other
+            ))),
         }
     }
 
@@ -352,7 +396,7 @@ impl Compiler {
         let mut seen_declarations = Vec::new();
 
         let mut collect_from_type = |t: &Type| {
-            let ctype = type_to_c(t);
+            let ctype = t.to_c_repr();
             for h in ctype.headers {
                 seen_headers.insert(h);
             }
@@ -489,7 +533,7 @@ impl Compiler {
     }
 
     fn transpile_type(&self, ty: &Type) -> String {
-        type_to_c(ty).name
+        ty.to_c_repr().name
     }
 
     pub fn compile(&mut self) -> CompileResult<()> {
@@ -503,21 +547,30 @@ impl Compiler {
             self.output.with_extension("c")
         };
 
-        let exe_name = self
+        // FIX: Handle path errors properly
+        let exe_stem = self
             .output
             .file_stem()
-            .unwrap()
+            .ok_or(CompilationError::InvalidOutputPath)?;
+        let exe_name = exe_stem
             .to_str()
-            .unwrap()
+            .ok_or(CompilationError::InvalidOutputPath)?
             .to_string();
 
         let detected =
             compiler::get_system_compiler().ok_or(CompilationError::ToolchainNotFound)?;
 
+        // FIX: Handle non-UTF-8 paths
+        let target_path = out_c
+            .clone()
+            .into_os_string()
+            .into_string()
+            .map_err(|_| CompilationError::InvalidOutputPath)?;
+
         let opts = CompilerOptions::new(CompilerMeta(detected.0))
             .link_libs(&self.libs)
             .lib_paths(&["/usr/local/lib"])
-            .targets(&[out_c.clone().into_os_string().into_string().unwrap()])
+            .targets(&[target_path])
             .build();
 
         let mut cmd = Command::new(&detected.1);

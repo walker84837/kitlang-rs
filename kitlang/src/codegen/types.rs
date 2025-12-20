@@ -1,10 +1,20 @@
 use std::collections::HashSet;
 use std::str::FromStr;
 
+pub trait ToCRepr<T> {
+    fn to_c_repr(&self) -> T;
+}
+
+impl<T: ToCRepr<T>> ToCRepr<T> for &T {
+    fn to_c_repr(&self) -> T {
+        (*self).to_c_repr()
+    }
+}
+
 // `Type` has float variants, which don't implement `Eq` or `Hash`.
 // We can implement `Hash` manually if we need to store `Type`s in a `HashSet`.
 // For now, `PartialEq` is sufficient.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Hash)]
 pub enum Type {
     Named(String),  // fallback for user-defined types
     Ptr(Box<Type>), // pointer type, e.g. Ptr[Int]
@@ -192,6 +202,9 @@ fn type_to_c_ident_string(t: &Type) -> String {
     match t {
         Type::Named(s) => s.clone(),
         Type::Ptr(inner) => format!("{}_ptr", type_to_c_ident_string(inner)),
+        // TODO: these types look more like Rust types than C types? The doc says "sanitized C
+        // identifier", but i8 to my knowledge seems more like a Rust type, instead of something
+        // like int8_t. I'm not sure if these many types exist in <stdlib.h>
         Type::Int8 => "i8".to_string(),
         Type::Int16 => "i16".to_string(),
         Type::Int32 => "i32".to_string(),
@@ -220,110 +233,112 @@ fn type_to_c_ident_string(t: &Type) -> String {
     }
 }
 
-pub(crate) fn type_to_c(t: &Type) -> CType {
-    match t {
-        Type::Int8 => CType::with_header("int8_t", "<stdint.h>"),
-        Type::Int16 => CType::with_header("int16_t", "<stdint.h>"),
-        Type::Int32 => CType::with_header("int32_t", "<stdint.h>"),
-        Type::Int64 => CType::with_header("int64_t", "<stdint.h>"),
-        Type::Uint8 => CType::with_header("uint8_t", "<stdint.h>"),
-        Type::Uint16 => CType::with_header("uint16_t", "<stdint.h>"),
-        Type::Uint32 => CType::with_header("uint32_t", "<stdint.h>"),
-        Type::Uint64 => CType::with_header("uint64_t", "<stdint.h>"),
+impl ToCRepr<CType> for Type {
+    fn to_c_repr(&self) -> CType {
+        match self {
+            Type::Int8 => CType::with_header("int8_t", "<stdint.h>"),
+            Type::Int16 => CType::with_header("int16_t", "<stdint.h>"),
+            Type::Int32 => CType::with_header("int32_t", "<stdint.h>"),
+            Type::Int64 => CType::with_header("int64_t", "<stdint.h>"),
+            Type::Uint8 => CType::with_header("uint8_t", "<stdint.h>"),
+            Type::Uint16 => CType::with_header("uint16_t", "<stdint.h>"),
+            Type::Uint32 => CType::with_header("uint32_t", "<stdint.h>"),
+            Type::Uint64 => CType::with_header("uint64_t", "<stdint.h>"),
 
-        Type::Float32 => CType::new("float"),
-        Type::Float64 => CType::new("double"),
+            Type::Float32 => CType::new("float"),
+            Type::Float64 => CType::new("double"),
 
-        Type::Int => CType::new("int"),
-        Type::Float => CType::new("float"),
-        Type::Size => CType::with_header("size_t", "<stddef.h>"),
-        Type::Char => CType::new("char"),
-        Type::Bool => CType::with_header("bool", "<stdbool.h>"),
+            Type::Int => CType::new("int"),
+            Type::Float => CType::new("float"),
+            Type::Size => CType::with_header("size_t", "<stddef.h>"),
+            Type::Char => CType::new("char"),
+            Type::Bool => CType::with_header("bool", "<stdbool.h>"),
 
-        Type::CString => CType::new("char*"),
+            Type::CString => CType::new("char*"),
 
-        Type::Ptr(inner) => {
-            let mut c = type_to_c(inner);
-            c.name.push('*');
-            c
-        }
-
-        Type::Tuple(fields) => {
-            let type_names_mangled = fields
-                .iter()
-                .map(type_to_c_ident_string)
-                .collect::<Vec<_>>()
-                .join("_");
-
-            let struct_name = format!("__KitTuple_{}", type_names_mangled);
-
-            let mut all_headers = HashSet::new();
-            let mut all_declarations = Vec::new();
-
-            let members = fields
-                .iter()
-                .enumerate()
-                .map(|(i, f)| {
-                    let c = type_to_c(f);
-                    for header in c.headers {
-                        all_headers.insert(header);
-                    }
-                    if let Some(decl) = c.declaration {
-                        all_declarations.push(decl);
-                    }
-                    format!("    {} _{};\n", c.name, i)
-                })
-                .collect::<String>();
-
-            all_declarations.push(format!(
-                "typedef struct {{\n{members}}} {name};",
-                members = members,
-                name = struct_name
-            ));
-
-            let final_declaration = all_declarations.join("\n");
-
-            CType {
-                name: struct_name,
-                headers: all_headers.into_iter().collect(),
-                declaration: Some(final_declaration),
+            Type::Ptr(inner) => {
+                let mut c = inner.to_c_repr();
+                c.name.push('*');
+                c
             }
-        }
 
-        Type::CArray(elem, len) => {
-            let base = type_to_c(elem);
-            if let Some(n) = len {
-                // fixed‐size
-                let mut ctype = base;
-                ctype.name = format!("{}[{}]", ctype.name, n);
-                ctype
-            } else {
-                // unsized: we generate an in‐place struct hack
-                let type_name_mangled = type_to_c_ident_string(elem);
-                let struct_name = format!("__KitArray_{}", type_name_mangled);
-                let decl = format!(
-                    "typedef struct {{ size_t len; {} *data; }} {};",
-                    base.name, struct_name
-                );
+            Type::Tuple(fields) => {
+                let type_names_mangled = fields
+                    .iter()
+                    .map(type_to_c_ident_string)
+                    .collect::<Vec<_>>()
+                    .join("_");
 
-                let mut all_headers: HashSet<String> = base.headers.into_iter().collect();
-                all_headers.insert("<stddef.h>".to_string());
+                let struct_name = format!("__KitTuple_{}", type_names_mangled);
 
+                let mut all_headers = HashSet::new();
                 let mut all_declarations = Vec::new();
-                if let Some(d) = base.declaration {
-                    all_declarations.push(d);
-                }
-                all_declarations.push(decl);
+
+                let members = fields
+                    .iter()
+                    .enumerate()
+                    .map(|(i, f)| {
+                        let c = f.to_c_repr();
+                        for header in c.headers {
+                            all_headers.insert(header);
+                        }
+                        if let Some(decl) = c.declaration {
+                            all_declarations.push(decl);
+                        }
+                        format!("    {} _{};\n", c.name, i)
+                    })
+                    .collect::<String>();
+
+                all_declarations.push(format!(
+                    "typedef struct {{\n{members}}} {name};",
+                    members = members,
+                    name = struct_name
+                ));
+
+                let final_declaration = all_declarations.join("\n");
 
                 CType {
                     name: struct_name,
                     headers: all_headers.into_iter().collect(),
-                    declaration: Some(all_declarations.join("\n")),
+                    declaration: Some(final_declaration),
                 }
             }
-        }
 
-        // User-defined
-        Type::Named(name) => CType::new(name.to_string()),
+            Type::CArray(elem, len) => {
+                let base = elem.to_c_repr();
+                if let Some(n) = len {
+                    // fixed‐size
+                    let mut ctype = base;
+                    ctype.name = format!("{}[{}]", ctype.name, n);
+                    ctype
+                } else {
+                    // unsized: we generate an in‐place struct hack
+                    let type_name_mangled = type_to_c_ident_string(elem);
+                    let struct_name = format!("__KitArray_{}", type_name_mangled);
+                    let decl = format!(
+                        "typedef struct {{ size_t len; {} *data; }} {};",
+                        base.name, struct_name
+                    );
+
+                    let mut all_headers: HashSet<String> = base.headers.into_iter().collect();
+                    all_headers.insert("<stddef.h>".to_string());
+
+                    let mut all_declarations = Vec::new();
+                    if let Some(d) = base.declaration {
+                        all_declarations.push(d);
+                    }
+                    all_declarations.push(decl);
+
+                    CType {
+                        name: struct_name,
+                        headers: all_headers.into_iter().collect(),
+                        declaration: Some(all_declarations.join("\n")),
+                    }
+                }
+            }
+
+            // User-defined
+            Type::Named(name) => CType::new(name.to_string()),
+        }
     }
 }
