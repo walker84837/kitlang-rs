@@ -109,16 +109,26 @@ impl From<(&'static str, Option<&'static str>)> for CType {
     fn from((nm, hdr): (&'static str, Option<&'static str>)) -> Self {
         CType {
             name: nm.into(),
-            required_header: hdr.map(|h| format!("<{}>", h)),
+            required_header: hdr.map(wrap_header),
         }
     }
 }
+
 impl From<(String, Option<&'static str>)> for CType {
     fn from((nm, hdr): (String, Option<&'static str>)) -> Self {
         CType {
             name: nm,
-            required_header: hdr.map(|h| format!("<{}>", h)),
+            required_header: hdr.map(wrap_header),
         }
+    }
+}
+
+/// Wraps a string in angle brackets (header.h) if it doesn't already have them
+fn wrap_header(h: &'static str) -> String {
+    if h.starts_with('<') && h.ends_with('>') {
+        h.to_string()
+    } else {
+        format!("<{}>", h)
     }
 }
 
