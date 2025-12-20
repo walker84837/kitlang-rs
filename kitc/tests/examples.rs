@@ -60,7 +60,10 @@ fn run_example_test(
         .stdout(predicate::eq(expected_output.as_str()))
         .success();
 
-    // Clean up the executable and .c file
+    // TODO: executable files are actually generated in the CWD, not in the examples folder.
+    // This explains why the executable is not actually removed. But I don't get why these tests
+    // passed on Linux and Mac if std::fs::remove_file is supposed to also fail when the file
+    // doesn't exist.
     if let Err(err) = std::fs::remove_file(&executable_path) {
         log::error!("Failed to remove executable: {err}");
     }
@@ -70,7 +73,6 @@ fn run_example_test(
 
     Ok(())
 }
-
 
 #[test]
 fn test_helloworld() -> Result<(), Box<dyn std::error::Error>> {

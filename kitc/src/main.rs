@@ -70,7 +70,8 @@ fn compile(source: &PathBuf, libs: &[String], measure: bool) -> Result<PathBuf, 
         .compile()
         .map_err(|e| format!("failed to compile: {e}"))?;
 
-    // TODO: should this information be moved into a separate struct?
+    // TODO: moves this to `kitlang`'s `Toolchain` and use its API for this. Using it avoids having
+    // to handle the flags manually as done here.
     let compiler_cmd = if cfg!(target_os = "windows") {
         if let Err(e) = which::which("cl") {
             eprintln!("couldn't find MSVC compiler: {e}");
@@ -85,8 +86,6 @@ fn compile(source: &PathBuf, libs: &[String], measure: bool) -> Result<PathBuf, 
     let mut cmd = Command::new(compiler_cmd);
 
     let out_flag = if cfg!(target_os = "windows") {
-        // TODO: fix this horrible code duplication. This is just a test to see what github actions
-        // does
         if let Err(e) = which::which("cl") {
             eprintln!("couldn't find MSVC compiler: {e}");
             "-o"
@@ -131,6 +130,8 @@ fn run_executable(exe_path: &PathBuf) -> Result<(), String> {
     Ok(())
 }
 
+// TODO: same thing here. This should be replaced with `kitlang`'s `Toolchain` API to properly
+// translate flags.
 fn translate_compiler_flags(libs: &[String]) -> Vec<String> {
     let mut native_flags = Vec::new();
     for lib_name in libs {
