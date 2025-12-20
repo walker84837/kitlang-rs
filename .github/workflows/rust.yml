@@ -28,5 +28,7 @@ jobs:
       - name: Build binary
         run: cargo build
 
-      - name: Compile Hello World
-        run: cargo run -- compile examples/helloworld.kit --run
+      # - name: Compile Hello World
+      #   run: cargo run -- compile examples/helloworld.kit --run
+      - name: Run Unit Tests
+        run: cargo test
