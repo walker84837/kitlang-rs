@@ -1,5 +1,5 @@
-use crate::{KitParser, Rule};
 use crate::{
+    KitParser, Rule,
     codegen::{
         compiler::{self, CompilerMeta, CompilerOptions, Toolchain},
         types::*,
@@ -13,6 +13,7 @@ use pest::{Parser, iterators::Pair};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::str::FromStr;
 
 type CompileResult<T> = Result<T, CompilationError>;
 
@@ -28,6 +29,32 @@ pub struct Compiler {
     output: PathBuf,
     includes: Vec<Include>,
     libs: Vec<String>,
+}
+
+/// Returns None when the string is not escaped
+// TODO: this might be useful in other places
+#[allow(dead_code)]
+fn unescape(s: impl AsRef<str>) -> Option<String> {
+    let s = s.as_ref();
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            match chars.next()? {
+                'n' => out.push('\n'),
+                'r' => out.push('\r'),
+                't' => out.push('\t'),
+                '\\' => out.push('\\'),
+                '\'' => out.push('\''),
+                '"' => out.push('"'),
+                // For this grammar, `\` escapes any character
+                other => out.push(other),
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    Some(out)
 }
 
 impl Compiler {
@@ -69,7 +96,7 @@ impl Compiler {
     }
 
     fn parse_include(&self, pair: Pair<Rule>) -> Include {
-        // include = { "include" ~ string ~ ";" }
+        // include_stmt = { "include" ~ string ~ ("=>" ~ string)? ~ ";" }
         let mut inner = pair.into_inner();
         let lit = inner.next().unwrap().as_str();
 
@@ -83,27 +110,27 @@ impl Compiler {
 
         let name = inner.next().unwrap().as_str().to_string();
 
-        let params = if let Some(node) = inner.peek()
-            && node.as_rule() == Rule::params
-        {
-            let params_node = inner.next().unwrap();
-            self.parse_params(params_node)
-        } else {
-            Vec::new()
-        };
+        let mut params: Vec<Param> = Vec::new();
+        let mut return_type: Option<Type> = None;
+        let mut body: Block = Block { stmts: Vec::new() };
 
-        let return_type = if let Some(node) = inner.peek()
-            && node.as_rule() == Rule::type_annotation
-        {
-            let type_node = inner.next().unwrap();
-            Some(self.parse_type(type_node))
-        } else {
-            None
-        };
-
-        // Parse function body
-        let body_node = inner.next().expect("function body block");
-        let body = self.parse_block(body_node);
+        // consume remaining child nodes and match on their rules
+        for node in inner {
+            match node.as_rule() {
+                Rule::params => {
+                    params = self.parse_params(node);
+                }
+                Rule::type_annotation => {
+                    return_type = Some(self.parse_type(node));
+                }
+                Rule::block => {
+                    body = self.parse_block(node);
+                }
+                _ => {
+                    // skip punctuation/other tokens
+                }
+            }
+        }
 
         Function {
             name,
@@ -116,8 +143,8 @@ impl Compiler {
     fn parse_params(&self, pair: Pair<Rule>) -> Vec<Param> {
         // param_list = { param ~ ("," ~ param )* }
         pair.into_inner()
-            .filter(|p| p.as_rule() == Rule::param)
-            .map(|p| {
+            .filter(|p: &Pair<Rule>| p.as_rule() == Rule::param)
+            .map(|p: Pair<Rule>| {
                 let mut inner = p.into_inner();
                 let name = inner.next().unwrap().as_str().to_string();
                 let type_node = inner.next().unwrap();
@@ -132,8 +159,8 @@ impl Compiler {
         let stmts = pair
             .into_inner()
             // grammar gives us a wrapper Rule::statement
-            .filter(|p| p.as_rule() == Rule::statement)
-            .map(|stmt_pair| {
+            .filter(|p: &Pair<Rule>| p.as_rule() == Rule::statement)
+            .map(|stmt_pair: Pair<Rule>| {
                 // unwrap the single child inside statement
                 let inner = stmt_pair.into_inner().next().unwrap();
                 match inner.as_rule() {
@@ -179,14 +206,7 @@ impl Compiler {
         let mut inner = pair.into_inner();
         let base = inner.next().unwrap().as_str().trim();
         // turn known names into their enum cases
-        let mut ty = match base {
-            "Int" => Type::Int,
-            "Float" => Type::Float,
-            "Char" => Type::Char,
-            "Size" => Type::Size,
-            "CString" => Type::CString,
-            other => Type::Named(other.to_string()),
-        };
+        let mut ty = Type::from_kit(base);
 
         // if there are array or pointer annotations, handle here…
         for sub in inner {
@@ -244,16 +264,10 @@ impl Compiler {
 
                 match first_pair.as_rule() {
                     Rule::unary_op => {
-                        let op = match first_pair.as_str() {
-                            "!" => UnaryOperator::Not,
-                            "-" => UnaryOperator::Negate,
-                            "&" => UnaryOperator::AddressOf,
-                            "*" => UnaryOperator::Dereference,
-                            "++" => UnaryOperator::Increment,
-                            "--" => UnaryOperator::Decrement,
-                            "~" => UnaryOperator::BitwiseNot,
-                            _ => unreachable!("Unknown unary operator: {}", first_pair.as_str()),
-                        };
+                        let first_pair = first_pair.as_str();
+                        let op =
+                            UnaryOperator::from_str(first_pair).expect("invalid unary operation");
+
                         let expr = self.parse_expr(inner_pairs.next().unwrap()); // The remaining is the inner unary/primary expression
                         Expr::UnaryOp {
                             op,
@@ -266,33 +280,49 @@ impl Compiler {
             }
             Rule::identifier => Expr::Identifier(pair.as_str().to_string()),
             Rule::literal => {
-                let s = pair.as_str();
-                match s {
-                    "true" => Expr::Literal(Literal::Bool(true)),
-                    "false" => Expr::Literal(Literal::Bool(false)),
-                    "null" => Expr::Literal(Literal::Null),
-                    _ => {
-                        // integer literal
-                        let i = s.parse::<i64>().expect("invalid int literal");
-                        Expr::Literal(Literal::Int(i))
+                let inner = pair.into_inner().next().unwrap();
+                match inner.as_rule() {
+                    Rule::number => {
+                        let num_pair = inner.into_inner().next().unwrap();
+                        match num_pair.as_rule() {
+                            Rule::integer => {
+                                let i = num_pair
+                                    .as_str()
+                                    .parse::<i64>()
+                                    .expect("invalid int literal");
+                                Expr::Literal(Literal::Int(i))
+                            }
+                            Rule::float => {
+                                let f = num_pair
+                                    .as_str()
+                                    .parse::<f64>()
+                                    .expect("invalid float literal");
+                                Expr::Literal(Literal::Float(f))
+                            }
+                            _ => unreachable!(),
+                        }
                     }
+                    Rule::boolean => match inner.as_str() {
+                        "true" => Expr::Literal(Literal::Bool(true)),
+                        "false" => Expr::Literal(Literal::Bool(false)),
+                        _ => unreachable!(),
+                    },
+                    Rule::char_literal => todo!("char literal parsing"),
+                    _ => unreachable!(),
                 }
-            }
-            Rule::float => {
-                let f = pair.as_str().parse::<f64>().expect("invalid float literal");
-                Expr::Literal(Literal::Float(f))
             }
             Rule::string => {
                 let full = pair.as_str();
                 let inner = &full[1..full.len() - 1];
+                // let unescaped = unescape(inner).unwrap_or_else(|| inner.to_string());
                 Expr::Literal(Literal::String(inner.to_string()))
             }
             Rule::function_call_expr => {
                 let mut inner = pair.into_inner();
                 let callee = inner.next().unwrap().as_str().to_string();
                 let args = inner
-                    .filter(|p| p.as_rule() == Rule::expr)
-                    .map(|p| self.parse_expr(p))
+                    .filter(|p: &Pair<Rule>| p.as_rule() == Rule::expr)
+                    .map(|p: Pair<Rule>| self.parse_expr(p))
                     .collect();
                 Expr::Call { callee, args }
             }
@@ -305,7 +335,6 @@ impl Compiler {
     }
 
     fn generate_c_code(&self, prog: Program) -> String {
-        let mut seen = HashSet::new();
         let mut out = String::new();
 
         // emit regular includes from the source `include` statements
@@ -318,39 +347,47 @@ impl Compiler {
             out.push_str(&line);
         }
 
+        let mut seen_headers = HashSet::new();
+        // Vec preserves order
+        let mut seen_declarations = Vec::new();
+
+        let mut collect_from_type = |t: &Type| {
+            let ctype = type_to_c(t);
+            for h in ctype.headers {
+                seen_headers.insert(h);
+            }
+            if let Some(d) = ctype.declaration
+                && !seen_declarations.contains(&d)
+            {
+                seen_declarations.push(d);
+            }
+        };
+
         // scan every function signature & body for types to gather their headers/typedefs
         for func in &prog.functions {
-            // return type
-            if let Some(r) = &func.return_type
-                && let Some(hdr) = type_to_c(r).required_header.clone()
-            {
-                seen.insert(hdr);
+            if let Some(r) = &func.return_type {
+                collect_from_type(r);
             }
-            // params
             for p in &func.params {
-                if let Some(hdr) = type_to_c(&p.ty).required_header.clone() {
-                    seen.insert(hdr);
-                }
+                collect_from_type(&p.ty);
             }
-            // body: any local decls with explicit types
             for stmt in &func.body.stmts {
-                if let Stmt::VarDecl { ty: Some(t), .. } = stmt
-                    && let Some(hdr) = type_to_c(t).required_header.clone()
-                {
-                    seen.insert(hdr);
+                if let Stmt::VarDecl { ty: Some(t), .. } = stmt {
+                    collect_from_type(t);
                 }
             }
         }
 
-        // emit each unique header or typedef
-        for hdr in seen {
-            if hdr.starts_with("typedef") {
-                // raw typedef
-                out.push_str(&hdr);
-            } else {
-                // assume it's "<...>"
-                out.push_str(&format!("#include {}\n", hdr));
-            }
+        // emit unique headers
+        for hdr in seen_headers {
+            out.push_str(&format!("#include {}\n", hdr));
+        }
+        out.push('\n');
+
+        // emit each unique typedef
+        for decl in seen_declarations {
+            out.push_str(&decl);
+            out.push('\n');
         }
         out.push('\n');
 
@@ -394,7 +431,7 @@ impl Compiler {
             }
         }
 
-        format!("{} {}({}) {{\n{}\n}}", return_type, func.name, params, body)
+        format!("{} {}({}) {{\n{}}}", return_type, func.name, params, body)
     }
 
     fn transpile_block(&self, block: &Block) -> String {
@@ -435,13 +472,7 @@ impl Compiler {
         debug!("Transpiling expr: {:#?}", expr);
         match expr {
             Expr::Identifier(id) => id.clone(),
-            Expr::Literal(lit) => match lit {
-                Literal::Int(i) => i.to_string(),
-                Literal::Float(f) => f.to_string(),
-                Literal::String(s) => format!("\"{}\"", s),
-                Literal::Bool(b) => b.to_string(),
-                Literal::Null => "NULL".to_string(),
-            },
+            Expr::Literal(lit) => lit.to_c(),
             Expr::Call { callee, args } => {
                 let args_str = args
                     .iter()
@@ -452,28 +483,13 @@ impl Compiler {
             }
             Expr::UnaryOp { op, expr } => {
                 let expr_str = self.transpile_expr(expr);
-                match op {
-                    UnaryOperator::Not => format!("!{}", expr_str),
-                    UnaryOperator::Negate => format!("-{}", expr_str),
-                    UnaryOperator::AddressOf => format!("&{}", expr_str),
-                    UnaryOperator::Dereference => format!("*{}", expr_str),
-                    UnaryOperator::Increment => format!("++{}", expr_str),
-                    UnaryOperator::Decrement => format!("--{}", expr_str),
-                    UnaryOperator::BitwiseNot => format!("~{}", expr_str),
-                }
+                op.to_string_with_expr(expr_str)
             }
         }
     }
 
     fn transpile_type(&self, ty: &Type) -> String {
-        match ty {
-            Type::Int => "int".to_string(),
-            Type::Float => "float".to_string(),
-            Type::CString => "char*".to_string(),
-            Type::Ptr(inner) => format!("{}*", self.transpile_type(inner)),
-            Type::Named(name) => name.clone(),
-            _ => todo!("Unsupported type: {:#?}", ty),
-        }
+        type_to_c(ty).name
     }
 
     pub fn compile(&mut self) -> CompileResult<()> {

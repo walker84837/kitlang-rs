@@ -138,11 +138,12 @@ tuple_literal = { "(" ~ expr ~ ("," ~ expr)+ ~ ")" }
 
 
 literal = { number | boolean | char_literal }
-float = @{ ("-"? ~ ASCII_DIGIT+ ~ "." ~ ASCII_DIGIT+) }
-number = @{ ("-"? ~ ASCII_DIGIT+ ~ ("." ~ ASCII_DIGIT+)? ) }
+number = { float | integer }
+integer = @{ ASCII_DIGIT+ }
+float = @{ ASCII_DIGIT+ ~ "." ~ ASCII_DIGIT+ ~ (("e" | "E") ~ ("+" | "-")? ~ ASCII_DIGIT+ )? }
 boolean = { "true" | "false" }
 char_literal = @{ "'" ~ ( "\\'" | !"'" ~ ANY ) ~ "'" }
 
-string = @{ "\"" ~ ( "\\\"" | !"\"" ~ ANY )* ~ "\"" }
+string = @{ "\"" ~ ( "\\" ~ ANY | !"\"" ~ ANY )* ~ "\"" }
 
 identifier = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")* }
