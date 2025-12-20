@@ -353,8 +353,8 @@ impl Compiler {
             Rule::string => {
                 let full = pair.as_str();
                 let inner = &full[1..full.len() - 1];
-                // let unescaped = unescape(inner).unwrap_or_else(|| inner.to_string());
-                Ok(Expr::Literal(Literal::String(inner.to_string())))
+                let unescaped = unescape(inner).unwrap_or_else(|| inner.to_string());
+                Ok(Expr::Literal(Literal::String(unescaped)))
             }
             Rule::function_call_expr => {
                 let mut inner = pair.into_inner();

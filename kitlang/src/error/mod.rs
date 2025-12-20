@@ -8,7 +8,7 @@ pub enum CompilationError {
     #[error("Failed to parse: {0}")]
     ParseError(String),
 
-    #[error("Failed to compile C code")]
+    #[error("Failed to compile C code:\n{}", String::from_utf8_lossy(.0))]
     CCompileError(Vec<u8>),
 
     #[error("Failed to find system C toolchain")]
