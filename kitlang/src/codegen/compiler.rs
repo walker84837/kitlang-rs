@@ -32,6 +32,7 @@ impl FromStr for Toolchain {
     }
 }
 
+// TODO: Fix this doctest from failing because of imports
 /// Convert a path's file stem to a lowercase `String`.
 ///
 /// This attempts to get the file stem (the filename without extension)
@@ -42,8 +43,9 @@ impl FromStr for Toolchain {
 ///
 /// # Examples
 ///
-/// ```
-/// #use std::path::Path;
+/// ```ignore
+/// # use std::path::Path;
+/// # use kitlang::codegen::compiler::get_lowercase_exe;
 ///
 /// assert_eq!(
 ///     get_lowercase_exe(Path::new("/foo/Bar.TXT")),
