@@ -24,7 +24,7 @@ Notable links:
 
 Here's a simple "Hello World!" example in Kit:
 
-```kit
+```c
 include "stdio.h";
 
 function main() {
