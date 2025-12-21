@@ -170,6 +170,7 @@ pub enum UnaryOperator {
 
 impl UnaryOperator {
     /// Formats the operator with its operand as a C expression string.
+    /// e.g. `to_string_with_expr("++", "x") -> "++x"`
     pub fn to_string_with_expr(&self, expr: impl Into<String>) -> String {
         let expr = expr.into();
         match self {
@@ -207,29 +208,41 @@ impl FromStr for UnaryOperator {
 /// Binary operators supported in Kit expressions.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum BinaryOperator {
-    // Additive
+    /// Additive
     Add,
+    /// Subtractive: `-`
     Subtract,
     // Multiplicative
     Multiply,
+    /// Divide
     Divide,
+    /// Modulo
     Modulo,
-    // Equality
+    /// Equality
     Eq,
+    /// Negative equality
     Neq,
-    // Comparison
+    /// Greater than
     Gt,
+    /// Greater than or equal
     Gte,
+    /// Less than
     Lt,
+    /// Less than or equal
     Lte,
     // Logical
     And,
+    /// Logical
     Or,
-    // Bitwise
+    /// Bitwise AND
     BitwiseAnd,
+    /// Bitwise OR
     BitwiseOr,
+    /// Bitwise XOR
     BitwiseXor,
+    /// Bitwise left shift
     BitwiseLeftShift,
+    /// Bitwise right shift
     BitwiseRightShift,
 }
 
@@ -461,15 +474,22 @@ fn type_to_c_ident_string(t: &Type) -> String {
 
 impl ToCRepr for Type {
     fn to_c_repr(&self) -> CType {
+        // small helper to reduce repetition for header-backed types
+        fn hdr(name: &str, header: &str) -> CType {
+            CType::with_header(name, header)
+        }
+
         match self {
-            Type::Int8 => CType::with_header("int8_t", "<stdint.h>"),
-            Type::Int16 => CType::with_header("int16_t", "<stdint.h>"),
-            Type::Int32 => CType::with_header("int32_t", "<stdint.h>"),
-            Type::Int64 => CType::with_header("int64_t", "<stdint.h>"),
-            Type::Uint8 => CType::with_header("uint8_t", "<stdint.h>"),
-            Type::Uint16 => CType::with_header("uint16_t", "<stdint.h>"),
-            Type::Uint32 => CType::with_header("uint32_t", "<stdint.h>"),
-            Type::Uint64 => CType::with_header("uint64_t", "<stdint.h>"),
+            // fixed-width integer types -> <stdint.h>
+            Type::Int8 => hdr("int8_t", "<stdint.h>"),
+            Type::Int16 => hdr("int16_t", "<stdint.h>"),
+            Type::Int32 => hdr("int32_t", "<stdint.h>"),
+            Type::Int64 => hdr("int64_t", "<stdint.h>"),
+            Type::Uint8 => hdr("uint8_t", "<stdint.h>"),
+            Type::Uint16 => hdr("uint16_t", "<stdint.h>"),
+            Type::Uint32 => hdr("uint32_t", "<stdint.h>"),
+            Type::Uint64 => hdr("uint64_t", "<stdint.h>"),
+
             Type::Float32 => CType::new("float"),
             Type::Float64 => CType::new("double"),
             Type::Int => CType::new("int"),
@@ -478,59 +498,74 @@ impl ToCRepr for Type {
             Type::Char => CType::new("char"),
             Type::Bool => CType::with_header("bool", "<stdbool.h>"),
             Type::CString => CType::new("char*"),
+
             Type::Ptr(inner) => {
                 let mut c = inner.to_c_repr();
-                // Add pointer asterisk to the type name
-                c.name.push('*');
+                c.name = format!("{}*", c.name); // clearer than push
                 c
             }
+
+            // Transform a tuple type into a C struct definition
             Type::Tuple(fields) => {
+                // Mangle each field's C identifier and join with '_', e.g., "i32_f64_..."
+                // to avoid name conflicts when tuples with same size have different types.
+                // In practice, this makes (Int, Int) and (Float, Float) two entirely
+                // different types when converted to C.
                 let type_names_mangled = fields
                     .iter()
                     .map(type_to_c_ident_string)
                     .collect::<Vec<_>>()
                     .join("_");
 
+                // Build a unique struct name using the mangled field list
                 let struct_name = format!("__KitTuple_{}", type_names_mangled);
 
+                // Collect all required headers and declarations from the fields
                 let mut all_headers = HashSet::new();
                 let mut all_declarations = Vec::new();
 
+                // Generate the struct members (like "int _0;") and gather headers/decls
                 let members = fields
                     .iter()
                     .enumerate()
                     .map(|(i, f)| {
                         let c = f.to_c_repr();
-                        for header in &c.headers {
-                            all_headers.insert(header.clone());
+
+                        // collect needed headers and declarations
+                        all_headers.extend(c.headers.into_iter());
+                        if let Some(decl) = c.declaration {
+                            all_declarations.push(decl);
                         }
-                        if let Some(decl) = &c.declaration {
-                            all_declarations.push(decl.clone());
-                        }
-                        format!("    {} _{};\n", c.name, i)
+
+                        format!("    {} _{};\n", c.name, i) // struct member line
                     })
                     .collect::<String>();
 
+                // Append the full typedef for the tuple struct
                 all_declarations.push(format!(
                     "typedef struct {{\n{}}} {};\n",
                     members, struct_name
                 ));
 
+                // Return the C type description for the tuple
                 CType {
                     name: struct_name,
                     headers: all_headers.into_iter().collect(),
                     declaration: Some(all_declarations.join("\n")),
                 }
             }
+
+            // Transform a C-array type
             Type::CArray(elem, len) => {
                 let base = elem.to_c_repr();
+
+                // Fixed-size array, like int[10]
                 if let Some(n) = len {
-                    // Fixed-size array: int[10]
                     let mut ctype = base;
                     ctype.name = format!("{}[{}]", ctype.name, n);
                     ctype
+                // Variable-length array: convert to wrapper struct with length + pointer
                 } else {
-                    // Variable-length array: represented as struct { size_t len; T* data; }
                     let type_name_mangled = type_to_c_ident_string(elem);
                     let struct_name = format!("__KitArray_{}", type_name_mangled);
                     let decl = format!(
@@ -538,6 +573,7 @@ impl ToCRepr for Type {
                         base.name, struct_name
                     );
 
+                    // Gather headers (need <stddef.h> for size_t) and any nested decls
                     let mut all_headers: HashSet<String> = base.headers.into_iter().collect();
                     all_headers.insert("<stddef.h>".to_string());
 
@@ -554,6 +590,7 @@ impl ToCRepr for Type {
                     }
                 }
             }
+
             // User-defined types are assumed to be already declared elsewhere
             Type::Named(name) => CType::new(name.to_string()),
         }
