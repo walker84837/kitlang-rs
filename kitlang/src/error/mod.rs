@@ -26,3 +26,16 @@ pub enum CompilationError {
     #[error(transparent)]
     Io(std::io::Error),
 }
+
+/// Helper macro to create a `CompilationError::ParseError`
+#[macro_export]
+macro_rules! parse_error {
+    // No arguments: just a literal string
+    ( $msg:literal ) => {
+        $crate::error::CompilationError::ParseError($msg.to_string())
+    };
+    // Literal with one or more format arguments
+    ( $fmt:literal, $($arg:tt)+ ) => {
+        $crate::error::CompilationError::ParseError(format!($fmt, $($arg)+))
+    };
+}
