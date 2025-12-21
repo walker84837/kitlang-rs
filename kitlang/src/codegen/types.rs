@@ -1,3 +1,6 @@
+use crate::Rule;
+use crate::error::CompilationError;
+use pest::iterators::Pair;
 use std::collections::HashSet;
 use std::str::FromStr;
 
@@ -246,30 +249,61 @@ pub enum BinaryOperator {
     BitwiseRightShift,
 }
 
-impl FromStr for BinaryOperator {
-    type Err = ();
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "+" => Ok(BinaryOperator::Add),
-            "-" => Ok(BinaryOperator::Subtract),
-            "*" => Ok(BinaryOperator::Multiply),
-            "/" => Ok(BinaryOperator::Divide),
-            "%" => Ok(BinaryOperator::Modulo),
-            "==" => Ok(BinaryOperator::Eq),
-            "!=" => Ok(BinaryOperator::Neq),
-            ">" => Ok(BinaryOperator::Gt),
-            ">=" => Ok(BinaryOperator::Gte),
-            "<" => Ok(BinaryOperator::Lt),
-            "<=" => Ok(BinaryOperator::Lte),
-            "&&" => Ok(BinaryOperator::And),
-            "||" => Ok(BinaryOperator::Or),
-            "&" => Ok(BinaryOperator::BitwiseAnd),
-            "|" => Ok(BinaryOperator::BitwiseOr),
-            "^" => Ok(BinaryOperator::BitwiseXor),
-            "<<" => Ok(BinaryOperator::BitwiseLeftShift),
-            ">>" => Ok(BinaryOperator::BitwiseRightShift),
-            _ => Err(()),
+impl BinaryOperator {
+    pub fn from_rule_pair(pair: &Pair<Rule>) -> Result<Self, CompilationError> {
+        match pair.as_rule() {
+            Rule::additive_op => match pair.as_str() {
+                "+" => Ok(BinaryOperator::Add),
+                "-" => Ok(BinaryOperator::Subtract),
+                _ => Err(CompilationError::InvalidOperator(format!(
+                    "Unknown additive operator: {}",
+                    pair.as_str()
+                ))),
+            },
+            Rule::multiplicative_op => match pair.as_str() {
+                "*" => Ok(BinaryOperator::Multiply),
+                "/" => Ok(BinaryOperator::Divide),
+                "%" => Ok(BinaryOperator::Modulo),
+                _ => Err(CompilationError::InvalidOperator(format!(
+                    "Unknown multiplicative operator: {}",
+                    pair.as_str()
+                ))),
+            },
+            Rule::eq_op => match pair.as_str() {
+                "==" => Ok(BinaryOperator::Eq),
+                "!=" => Ok(BinaryOperator::Neq),
+                _ => Err(CompilationError::InvalidOperator(format!(
+                    "Unknown equality operator: {}",
+                    pair.as_str()
+                ))),
+            },
+            Rule::comp_op => match pair.as_str() {
+                ">" => Ok(BinaryOperator::Gt),
+                ">=" => Ok(BinaryOperator::Gte),
+                "<" => Ok(BinaryOperator::Lt),
+                "<=" => Ok(BinaryOperator::Lte),
+                _ => Err(CompilationError::InvalidOperator(format!(
+                    "Unknown comparison operator: {}",
+                    pair.as_str()
+                ))),
+            },
+            Rule::logical_and_op => Ok(BinaryOperator::And),
+            Rule::logical_or_op => Ok(BinaryOperator::Or),
+            Rule::bitwise_and_op => Ok(BinaryOperator::BitwiseAnd),
+            Rule::bitwise_or_op => Ok(BinaryOperator::BitwiseOr),
+            Rule::bitwise_xor_op => Ok(BinaryOperator::BitwiseXor),
+            Rule::shift_op => match pair.as_str() {
+                "<<" => Ok(BinaryOperator::BitwiseLeftShift),
+                ">>" => Ok(BinaryOperator::BitwiseRightShift),
+                _ => Err(CompilationError::InvalidOperator(format!(
+                    "Unknown shift operator: {}",
+                    pair.as_str()
+                ))),
+            },
+            _ => Err(CompilationError::InvalidOperator(format!(
+                "Unexpected rule for binary operator: {:?}",
+                pair.as_rule()
+            ))),
         }
     }
 }
@@ -299,6 +333,79 @@ impl BinaryOperator {
     }
 }
 
+/// Assignment operators supported in Kit expressions.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum AssignmentOperator {
+    /// Simple assignment (`=`).
+    Assign,
+    /// Add and assign (`+=`).
+    AddAssign,
+    /// Subtract and assign (`-=`).
+    SubtractAssign,
+    /// Multiply and assign (`*=`).
+    MultiplyAssign,
+    /// Divide and assign (`/=`).
+    DivideAssign,
+    /// Modulo and assign (`%=`).
+    ModuloAssign,
+    /// Bitwise AND and assign (`&=`).
+    BitwiseAndAssign,
+    /// Bitwise OR and assign (`|=`).
+    BitwiseOrAssign,
+    /// Bitwise XOR and assign (`^=`).
+    BitwiseXorAssign,
+    /// Bitwise left shift and assign (`<<=`).
+    BitwiseLeftShiftAssign,
+    /// Bitwise right shift and assign (`>>=`).
+    BitwiseRightShiftAssign,
+}
+
+impl AssignmentOperator {
+    pub fn from_rule_pair(pair: &Pair<Rule>) -> Result<Self, CompilationError> {
+        match pair.as_rule() {
+            Rule::assign_op => match pair.as_str() {
+                "=" => Ok(AssignmentOperator::Assign),
+                "+=" => Ok(AssignmentOperator::AddAssign),
+                "-=" => Ok(AssignmentOperator::SubtractAssign),
+                "*=" => Ok(AssignmentOperator::MultiplyAssign),
+                "/=" => Ok(AssignmentOperator::DivideAssign),
+                "%=" => Ok(AssignmentOperator::ModuloAssign),
+                "&=" => Ok(AssignmentOperator::BitwiseAndAssign),
+                "|=" => Ok(AssignmentOperator::BitwiseOrAssign),
+                "^=" => Ok(AssignmentOperator::BitwiseXorAssign),
+                "<<=" => Ok(AssignmentOperator::BitwiseLeftShiftAssign),
+                ">>=" => Ok(AssignmentOperator::BitwiseRightShiftAssign),
+                _ => Err(CompilationError::InvalidOperator(format!(
+                    "Unknown assignment operator: {}",
+                    pair.as_str()
+                ))),
+            },
+            _ => Err(CompilationError::InvalidOperator(format!(
+                "Unexpected rule for assignment operator: {:?}",
+                pair.as_rule()
+            ))),
+        }
+    }
+}
+
+impl AssignmentOperator {
+    pub fn to_c_str(&self) -> &'static str {
+        match self {
+            AssignmentOperator::Assign => "=",
+            AssignmentOperator::AddAssign => "+=",
+            AssignmentOperator::SubtractAssign => "-=",
+            AssignmentOperator::MultiplyAssign => "*=",
+            AssignmentOperator::DivideAssign => "/=",
+            AssignmentOperator::ModuloAssign => "%=",
+            AssignmentOperator::BitwiseAndAssign => "&=",
+            AssignmentOperator::BitwiseOrAssign => "|=",
+            AssignmentOperator::BitwiseXorAssign => "^=",
+            AssignmentOperator::BitwiseLeftShiftAssign => "<<=",
+            AssignmentOperator::BitwiseRightShiftAssign => ">>=",
+        }
+    }
+}
+
 /// Represents an expression in Kit.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Expr {
@@ -323,6 +430,12 @@ pub enum Expr {
     /// Binary operation.
     BinaryOp {
         op: BinaryOperator,
+        left: Box<Expr>,
+        right: Box<Expr>,
+    },
+    /// Assignment operation.
+    Assign {
+        op: AssignmentOperator,
         left: Box<Expr>,
         right: Box<Expr>,
     },

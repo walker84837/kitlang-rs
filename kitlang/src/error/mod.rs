@@ -8,6 +8,9 @@ pub enum CompilationError {
     #[error("Failed to parse: {0}")]
     ParseError(String),
 
+    #[error("Invalid operator: {0}")]
+    InvalidOperator(String),
+
     #[error("Failed to compile C code:\n{}", String::from_utf8_lossy(.0))]
     CCompileError(Vec<u8>),
 

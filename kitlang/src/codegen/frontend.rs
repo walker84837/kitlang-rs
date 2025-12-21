@@ -272,14 +272,13 @@ impl Compiler {
     }
 
     fn parse_expr(&self, pair: Pair<Rule>) -> CompileResult<Expr> {
-        // first, peel off any of the wrapper rules:
         match pair.as_rule() {
-            Rule::expr
-            | Rule::assign => {
+            Rule::expr => {
                 // SAFETY: Grammar guarantees exactly one child for wrapper rules
                 let inner = pair.into_inner().next().unwrap();
-                return self.parse_expr(inner);
+                self.parse_expr(inner)
             }
+            Rule::assign => self.parse_assign_expr(pair),
             Rule::logical_or
             | Rule::logical_and
             | Rule::equality
@@ -290,13 +289,24 @@ impl Compiler {
             | Rule::bitwise_xor
             | Rule::bitwise_and
             | Rule::shift => {
-                return self.parse_binary_expr(pair);
-            }
-            _ => { /* Do nothing here, fall through to the next match */ }
-        }
+                let mut inner = pair.into_inner();
+                // The first child is the left-hand operand.
+                // The recursive call to parse_expr will handle the correct precedence for this operand.
+                let mut left = self.parse_expr(inner.next().unwrap())?;
 
-        // now handle the real terminals
-        match pair.as_rule() {
+                while let Some(op_pair) = inner.next() {
+                    let op = BinaryOperator::from_rule_pair(&op_pair)?;
+                    // The next child is the right-hand operand.
+                    // The recursive call to parse_expr will handle the correct precedence for this operand.
+                    let right = self.parse_expr(inner.next().unwrap())?;
+                    left = Expr::BinaryOp {
+                        op,
+                        left: Box::new(left),
+                        right: Box::new(right),
+                    };
+                }
+                Ok(left)
+            }
             Rule::unary => {
                 let mut inner_pairs = pair.into_inner();
                 // SAFETY: Unary rule always has at least one child
@@ -414,27 +424,6 @@ impl Compiler {
                 other
             ))),
         }
-    }
-
-    fn parse_binary_expr(&self, pair: Pair<Rule>) -> CompileResult<Expr> {
-        let mut inner = pair.into_inner();
-        let mut left = self.parse_expr(inner.next().unwrap())?;
-        while let Some(op_pair) = inner.next() {
-            let op = BinaryOperator::from_str(op_pair.as_str()).map_err(|_| {
-                CompilationError::ParseError(format!(
-                    "invalid binary operator: '{}' with rule {:?}",
-                    op_pair.as_str(),
-                    op_pair.as_rule()
-                ))
-            })?;
-            let right = self.parse_expr(inner.next().unwrap())?;
-            left = Expr::BinaryOp {
-                op,
-                left: Box::new(left),
-                right: Box::new(right),
-            };
-        }
-        Ok(left)
     }
 
     fn generate_c_code(&self, prog: Program) -> String {
@@ -575,20 +564,8 @@ impl Compiler {
                     let then_code = self.transpile_block(then_branch);
                     let mut if_str = format!("if ({}) {{\n{}}}", cond_str, then_code);
                     if let Some(else_b) = else_branch {
-                        if else_b.stmts.len() == 1 {
-                            if let Stmt::If { .. } = &else_b.stmts[0] {
-                                // it's an else if
-                                let else_if_code = self.transpile_block(else_b);
-                                if_str.push_str(&format!(" else {}", else_if_code));
-                            } else {
-                                // it's a normal else block with one statement
-                                let else_code = self.transpile_block(else_b);
-                                if_str.push_str(&format!(" else {{\n{}}}", else_code));
-                            }
-                        } else {
-                            let else_code = self.transpile_block(else_b);
-                            if_str.push_str(&format!(" else {{\n{}}}", else_code));
-                        }
+                        let else_code = self.transpile_block(else_b);
+                        if_str.push_str(&format!(" else {{\n{}}}", else_code));
                     }
                     code.push_str(&if_str);
                 }
@@ -629,11 +606,41 @@ impl Compiler {
                 let else_str = self.transpile_expr(else_branch);
                 format!("({}) ? ({}) : ({})", cond_str, then_str, else_str)
             }
+            Expr::Assign { op, left, right } => {
+                let left_str = self.transpile_expr(left);
+                let right_str = self.transpile_expr(right);
+                format!("({} {} {})", left_str, op.to_c_str(), right_str)
+            }
         }
     }
 
     fn transpile_type(&self, ty: &Type) -> String {
         ty.to_c_repr().name
+    }
+
+    /// Parses an assignment expression (right-associative).
+    fn parse_assign_expr(&self, pair: Pair<Rule>) -> CompileResult<Expr> {
+        let mut inner = pair.into_inner();
+        let left_pair = inner.next().unwrap();
+
+        // The LHS of an assignment can be a logical_or expression.
+        // We'll parse it as such, but it might not be a valid l-value.
+        // This check will happen during semantic analysis.
+        let left = self.parse_expr(left_pair)?;
+
+        if let Some(op_pair) = inner.next() {
+            let op = AssignmentOperator::from_rule_pair(&op_pair)?;
+            // Assignment is right-associative, so parse the right-hand side as another assign expr.
+            let right = self.parse_assign_expr(inner.next().unwrap())?;
+            Ok(Expr::Assign {
+                op,
+                left: Box::new(left),
+                right: Box::new(right),
+            })
+        } else {
+            // If there's no operator, it's just the left-hand side expression.
+            Ok(left)
+        }
     }
 
     pub fn compile(&mut self) -> CompileResult<()> {
