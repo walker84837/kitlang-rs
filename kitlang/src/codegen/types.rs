@@ -532,7 +532,7 @@ impl ToCRepr for Type {
                         let c = f.to_c_repr();
 
                         // collect needed headers and declarations
-                        all_headers.extend(c.headers.into_iter());
+                        all_headers.extend(c.headers);
                         if let Some(decl) = c.declaration {
                             all_declarations.push(decl);
                         }
