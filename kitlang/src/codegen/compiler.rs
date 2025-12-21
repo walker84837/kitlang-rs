@@ -32,13 +32,6 @@ impl FromStr for Toolchain {
     }
 }
 
-pub enum Optimizations {
-    // Should be handled by the compiler itself
-    Simple = 1,
-    Medium = 2,
-    Aggressive = 3,
-}
-
 // TODO: Fix this doctest from failing because of imports
 /// Convert a path's file stem to a lowercase `String`.
 ///

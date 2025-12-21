@@ -47,7 +47,8 @@ expr_stmt = { expr ~ ";" }
 
 return_stmt = { "return" ~ expr? ~ ";" }
 
-if_stmt = { "if" ~ expr ~ block ~ ("else" ~ (block | if_stmt))? }
+if_stmt = { "if" ~ expr ~ block ~ else_part? }
+else_part = { "else" ~ (block | if_stmt) }
 
 for_stmt = { "for" ~ identifier ~ "in" ~ expr ~ block }
 
@@ -97,8 +98,10 @@ assign = { logical_or ~ (("=" | assign_op) ~ assign)? }
 assign_op = { "+=" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" | "^=" | "<<=" | ">>=" }
 logical_or = { logical_and ~ ("||" ~ logical_and)* }
 logical_and = { equality ~ ("&&" ~ equality)* }
-equality = { comparison ~ (("==" | "!=") ~ comparison)* }
-comparison = { bitwise_or ~ (("<" | ">" | "<=" | ">=") ~ bitwise_or)* }
+eq_op = { "==" | "!=" }
+equality = { comparison ~ (eq_op ~ comparison)* }
+comp_op = { "<" | ">" | "<=" | ">=" }
+comparison = { bitwise_or ~ (comp_op ~ bitwise_or)* }
 bitwise_or = { bitwise_xor ~ ("|" ~ bitwise_xor)* }
 bitwise_xor = { bitwise_and ~ ("^" ~ bitwise_and)* }
 bitwise_and = { shift ~ ("&" ~ shift)* }
@@ -107,7 +110,9 @@ additive = { multiplicative ~ (("+" | "-") ~ multiplicative)* }
 multiplicative = { unary ~ (("*" | "/" | "%") ~ unary)* }
 unary_op = { "!" | "-" | "&" | "*" | "++" | "--" | "~" }
 unary = { (unary_op ~ unary) | primary }
+if_expr = { "if" ~ expr ~ "then" ~ expr ~ "else" ~ expr }
 primary = {
+    if_expr |
     function_call_expr |
     array_literal |
     struct_init |

@@ -138,6 +138,15 @@ pub enum Stmt {
     Expr(Expr),
     /// Return statement (with optional return value).
     Return(Option<Expr>),
+    /// If-else statement.
+    If {
+        /// The condition to evaluate.
+        cond: Expr,
+        /// The block to execute if the condition is true.
+        then_branch: Block,
+        /// The block to execute if the condition is false.
+        else_branch: Option<Block>,
+    },
 }
 
 /// Unary operators supported in Kit expressions.
@@ -195,6 +204,88 @@ impl FromStr for UnaryOperator {
     }
 }
 
+/// Binary operators supported in Kit expressions.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum BinaryOperator {
+    // Additive
+    Add,
+    Subtract,
+    // Multiplicative
+    Multiply,
+    Divide,
+    Modulo,
+    // Equality
+    Eq,
+    Neq,
+    // Comparison
+    Gt,
+    Gte,
+    Lt,
+    Lte,
+    // Logical
+    And,
+    Or,
+    // Bitwise
+    BitwiseAnd,
+    BitwiseOr,
+    BitwiseXor,
+    BitwiseLeftShift,
+    BitwiseRightShift,
+}
+
+impl FromStr for BinaryOperator {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "+" => Ok(BinaryOperator::Add),
+            "-" => Ok(BinaryOperator::Subtract),
+            "*" => Ok(BinaryOperator::Multiply),
+            "/" => Ok(BinaryOperator::Divide),
+            "%" => Ok(BinaryOperator::Modulo),
+            "==" => Ok(BinaryOperator::Eq),
+            "!=" => Ok(BinaryOperator::Neq),
+            ">" => Ok(BinaryOperator::Gt),
+            ">=" => Ok(BinaryOperator::Gte),
+            "<" => Ok(BinaryOperator::Lt),
+            "<=" => Ok(BinaryOperator::Lte),
+            "&&" => Ok(BinaryOperator::And),
+            "||" => Ok(BinaryOperator::Or),
+            "&" => Ok(BinaryOperator::BitwiseAnd),
+            "|" => Ok(BinaryOperator::BitwiseOr),
+            "^" => Ok(BinaryOperator::BitwiseXor),
+            "<<" => Ok(BinaryOperator::BitwiseLeftShift),
+            ">>" => Ok(BinaryOperator::BitwiseRightShift),
+            _ => Err(()),
+        }
+    }
+}
+
+impl BinaryOperator {
+    pub fn to_c_str(&self) -> &'static str {
+        match self {
+            BinaryOperator::Add => "+",
+            BinaryOperator::Subtract => "-",
+            BinaryOperator::Multiply => "*",
+            BinaryOperator::Divide => "/",
+            BinaryOperator::Modulo => "%",
+            BinaryOperator::Eq => "==",
+            BinaryOperator::Neq => "!=",
+            BinaryOperator::Gt => ">",
+            BinaryOperator::Gte => ">=",
+            BinaryOperator::Lt => "<",
+            BinaryOperator::Lte => "<=",
+            BinaryOperator::And => "&&",
+            BinaryOperator::Or => "||",
+            BinaryOperator::BitwiseAnd => "&",
+            BinaryOperator::BitwiseOr => "|",
+            BinaryOperator::BitwiseXor => "^",
+            BinaryOperator::BitwiseLeftShift => "<<",
+            BinaryOperator::BitwiseRightShift => ">>",
+        }
+    }
+}
+
 /// Represents an expression in Kit.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Expr {
@@ -215,6 +306,21 @@ pub enum Expr {
         op: UnaryOperator,
         /// The operand expression.
         expr: Box<Expr>,
+    },
+    /// Binary operation.
+    BinaryOp {
+        op: BinaryOperator,
+        left: Box<Expr>,
+        right: Box<Expr>,
+    },
+    /// If-then-else expression.
+    If {
+        /// The condition to evaluate.
+        cond: Box<Expr>,
+        /// The expression to evaluate if the condition is true.
+        then_branch: Box<Expr>,
+        /// The expression to evaluate if the condition is false.
+        else_branch: Box<Expr>,
     },
 }
 

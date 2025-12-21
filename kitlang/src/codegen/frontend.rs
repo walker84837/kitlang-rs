@@ -17,13 +17,6 @@ use std::str::FromStr;
 
 type CompileResult<T> = Result<T, CompilationError>;
 
-pub enum Optimizations {
-    // Should be handled by the compiler itself
-    Simple = 1,
-    Medium = 2,
-    Aggressive = 3,
-}
-
 pub struct Compiler {
     files: Vec<PathBuf>,
     output: PathBuf,
@@ -170,6 +163,7 @@ impl Compiler {
                     Rule::var_decl => self.parse_var_decl(inner),
                     Rule::expr_stmt => self.parse_expr_stmt(inner),
                     Rule::return_stmt => self.parse_return(inner),
+                    Rule::if_stmt => self.parse_if_stmt(inner),
                     other => Err(CompilationError::ParseError(format!(
                         "unexpected statement: {:?}",
                         other
@@ -246,12 +240,47 @@ impl Compiler {
         Ok(Stmt::Return(expr))
     }
 
+    fn parse_if_stmt(&self, pair: Pair<Rule>) -> CompileResult<Stmt> {
+        // if_stmt = { "if" ~ expr ~ block ~ else_part? }
+        // else_part = { "else" ~ (block | if_stmt) }
+        let mut inner = pair.into_inner();
+        let cond = self.parse_expr(inner.next().unwrap())?;
+        let then_branch = self.parse_block(inner.next().unwrap())?;
+
+        let mut else_branch = None;
+        if let Some(else_pair) = inner.next() {
+            assert_eq!(else_pair.as_rule(), Rule::else_part);
+            let else_content = else_pair.into_inner().next().unwrap();
+            let else_block = match else_content.as_rule() {
+                Rule::block => self.parse_block(else_content)?,
+                Rule::if_stmt => {
+                    let if_stmt = self.parse_if_stmt(else_content)?;
+                    Block {
+                        stmts: vec![if_stmt],
+                    }
+                }
+                _ => unreachable!(),
+            };
+            else_branch = Some(else_block);
+        }
+
+        Ok(Stmt::If {
+            cond,
+            then_branch,
+            else_branch,
+        })
+    }
+
     fn parse_expr(&self, pair: Pair<Rule>) -> CompileResult<Expr> {
         // first, peel off any of the wrapper rules:
         match pair.as_rule() {
             Rule::expr
-            | Rule::assign
-            | Rule::logical_or
+            | Rule::assign => {
+                // SAFETY: Grammar guarantees exactly one child for wrapper rules
+                let inner = pair.into_inner().next().unwrap();
+                return self.parse_expr(inner);
+            }
+            Rule::logical_or
             | Rule::logical_and
             | Rule::equality
             | Rule::comparison
@@ -261,9 +290,7 @@ impl Compiler {
             | Rule::bitwise_xor
             | Rule::bitwise_and
             | Rule::shift => {
-                // SAFETY: Grammar guarantees exactly one child for wrapper rules
-                let inner = pair.into_inner().next().unwrap();
-                return self.parse_expr(inner);
+                return self.parse_binary_expr(pair);
             }
             _ => { /* Do nothing here, fall through to the next match */ }
         }
@@ -366,6 +393,17 @@ impl Compiler {
                     .collect::<Result<Vec<_>, _>>()?; // Collect and propagate errors
                 Ok(Expr::Call { callee, args })
             }
+            Rule::if_expr => {
+                let mut inner = pair.into_inner();
+                let cond = self.parse_expr(inner.next().unwrap())?;
+                let then_branch = self.parse_expr(inner.next().unwrap())?;
+                let else_branch = self.parse_expr(inner.next().unwrap())?;
+                Ok(Expr::If {
+                    cond: Box::new(cond),
+                    then_branch: Box::new(then_branch),
+                    else_branch: Box::new(else_branch),
+                })
+            }
             Rule::primary => {
                 // SAFETY: Primary rule always has exactly one child
                 let inner = pair.into_inner().next().unwrap();
@@ -376,6 +414,27 @@ impl Compiler {
                 other
             ))),
         }
+    }
+
+    fn parse_binary_expr(&self, pair: Pair<Rule>) -> CompileResult<Expr> {
+        let mut inner = pair.into_inner();
+        let mut left = self.parse_expr(inner.next().unwrap())?;
+        while let Some(op_pair) = inner.next() {
+            let op = BinaryOperator::from_str(op_pair.as_str()).map_err(|_| {
+                CompilationError::ParseError(format!(
+                    "invalid binary operator: '{}' with rule {:?}",
+                    op_pair.as_str(),
+                    op_pair.as_rule()
+                ))
+            })?;
+            let right = self.parse_expr(inner.next().unwrap())?;
+            left = Expr::BinaryOp {
+                op,
+                left: Box::new(left),
+                right: Box::new(right),
+            };
+        }
+        Ok(left)
     }
 
     fn generate_c_code(&self, prog: Program) -> String {
@@ -507,6 +566,32 @@ impl Compiler {
                         .map_or(String::new(), |e| format!(" {}", self.transpile_expr(e)));
                     code.push_str(&format!("return{};\n", expr_str));
                 }
+                Stmt::If {
+                    cond,
+                    then_branch,
+                    else_branch,
+                } => {
+                    let cond_str = self.transpile_expr(cond);
+                    let then_code = self.transpile_block(then_branch);
+                    let mut if_str = format!("if ({}) {{\n{}}}", cond_str, then_code);
+                    if let Some(else_b) = else_branch {
+                        if else_b.stmts.len() == 1 {
+                            if let Stmt::If { .. } = &else_b.stmts[0] {
+                                // it's an else if
+                                let else_if_code = self.transpile_block(else_b);
+                                if_str.push_str(&format!(" else {}", else_if_code));
+                            } else {
+                                // it's a normal else block with one statement
+                                let else_code = self.transpile_block(else_b);
+                                if_str.push_str(&format!(" else {{\n{}}}", else_code));
+                            }
+                        } else {
+                            let else_code = self.transpile_block(else_b);
+                            if_str.push_str(&format!(" else {{\n{}}}", else_code));
+                        }
+                    }
+                    code.push_str(&if_str);
+                }
             }
         }
         code
@@ -528,6 +613,21 @@ impl Compiler {
             Expr::UnaryOp { op, expr } => {
                 let expr_str = self.transpile_expr(expr);
                 op.to_string_with_expr(expr_str)
+            }
+            Expr::BinaryOp { op, left, right } => {
+                let left_str = self.transpile_expr(left);
+                let right_str = self.transpile_expr(right);
+                format!("({} {} {})", left_str, op.to_c_str(), right_str)
+            }
+            Expr::If {
+                cond,
+                then_branch,
+                else_branch,
+            } => {
+                let cond_str = self.transpile_expr(cond);
+                let then_str = self.transpile_expr(then_branch);
+                let else_str = self.transpile_expr(else_branch);
+                format!("({}) ? ({}) : ({})", cond_str, then_str, else_str)
             }
         }
     }
