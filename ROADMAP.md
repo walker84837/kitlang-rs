@@ -27,7 +27,7 @@ Goal: lower a well-defined subset of Kit ("Kit Core") to portable C99.
   - [ ] `Int`
   - [ ] `Bool`
   - [ ] `CString`
-- [ ] `if` expressions / statements
+- [X] `if` expressions / statements
 - [ ] `while` and `for` loops
 - [X] Function calls
 - [X] `return`
