@@ -67,6 +67,8 @@ pub enum Token {
     If,
     #[token("else")]
     Else,
+    #[token("then")]
+    Then,
     #[token("true")]
     True,
     #[token("false")]

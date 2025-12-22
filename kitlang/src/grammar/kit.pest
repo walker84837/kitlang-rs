@@ -47,7 +47,8 @@ expr_stmt = { expr ~ ";" }
 
 return_stmt = { "return" ~ expr? ~ ";" }
 
-if_stmt = { "if" ~ expr ~ block ~ ("else" ~ (block | if_stmt))? }
+if_stmt = { "if" ~ expr ~ block ~ else_part? }
+else_part = { "else" ~ (block | if_stmt) }
 
 for_stmt = { "for" ~ identifier ~ "in" ~ expr ~ block }
 
@@ -95,19 +96,32 @@ trait_impl = { metadata_and_modifiers ~ "implement" ~ type_annotation ~ type_par
 expr = { assign }
 assign = { logical_or ~ (("=" | assign_op) ~ assign)? }
 assign_op = { "+=" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" | "^=" | "<<=" | ">>=" }
-logical_or = { logical_and ~ ("||" ~ logical_and)* }
-logical_and = { equality ~ ("&&" ~ equality)* }
-equality = { comparison ~ (("==" | "!=") ~ comparison)* }
-comparison = { bitwise_or ~ (("<" | ">" | "<=" | ">=") ~ bitwise_or)* }
-bitwise_or = { bitwise_xor ~ ("|" ~ bitwise_xor)* }
-bitwise_xor = { bitwise_and ~ ("^" ~ bitwise_and)* }
-bitwise_and = { shift ~ ("&" ~ shift)* }
-shift = { additive ~ (("<<" | ">>") ~ additive)* }
-additive = { multiplicative ~ (("+" | "-") ~ multiplicative)* }
-multiplicative = { unary ~ (("*" | "/" | "%") ~ unary)* }
+
+logical_or_op = { "||" }
+logical_and_op = { "&&" }
+bitwise_or_op = { "|" }
+bitwise_xor_op = { "^" }
+bitwise_and_op = { "&" }
+shift_op = { "<<" | ">>" }
+additive_op = { "+" | "-" }
+multiplicative_op = { "*" | "/" | "%" }
+logical_or = { logical_and ~ (logical_or_op ~ logical_and)* }
+logical_and = { equality ~ (logical_and_op ~ equality)* }
+eq_op = { "==" | "!=" }
+equality = { comparison ~ (eq_op ~ comparison)* }
+comp_op = { "<" | ">" | "<=" | ">=" }
+comparison = { bitwise_or ~ (comp_op ~ bitwise_or)* }
+bitwise_or = { bitwise_xor ~ (bitwise_or_op ~ bitwise_xor)* }
+bitwise_xor = { bitwise_and ~ (bitwise_xor_op ~ bitwise_and)* }
+bitwise_and = { shift ~ (bitwise_and_op ~ shift)* }
+shift = { additive ~ (shift_op ~ additive)* }
+additive = { multiplicative ~ (additive_op ~ multiplicative)* }
+multiplicative = { unary ~ (multiplicative_op ~ unary)* }
 unary_op = { "!" | "-" | "&" | "*" | "++" | "--" | "~" }
 unary = { (unary_op ~ unary) | primary }
+if_expr = { "if" ~ expr ~ "then" ~ expr ~ "else" ~ expr }
 primary = {
+    if_expr |
     function_call_expr |
     array_literal |
     struct_init |

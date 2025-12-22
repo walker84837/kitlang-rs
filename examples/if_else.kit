@@ -1,0 +1,23 @@
+include "stdio.h";
+
+function main(): Int {
+    var x: Int = 10;
+    if (x == 10) {
+        printf("x is 10\n");
+    } else {
+        printf("x is not 10\n");
+    }
+
+    if (x > 10) {
+        printf("x is greater than 10\n");
+    } else {
+        printf("x is not greater than 10\n");
+    }
+
+    var y: Int = if x == 10 then 5 else 0;
+    if (y == 5) {
+        printf("y is 5\n");
+    }
+
+    return 0;
+}

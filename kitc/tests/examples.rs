@@ -104,3 +104,13 @@ fn test_bitwise_not() -> Result<(), Box<dyn std::error::Error>> {
 fn test_input() -> Result<(), Box<dyn std::error::Error>> {
     run_example_test("input", Some("42\n"))
 }
+
+#[test]
+fn test_if_else() -> Result<(), Box<dyn std::error::Error>> {
+    run_example_test("if_else", None)
+}
+
+#[test]
+fn test_precedence() -> Result<(), Box<dyn std::error::Error>> {
+    run_example_test("precedence", None)
+}

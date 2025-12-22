@@ -5,6 +5,7 @@ use crate::{
         types::*,
     },
     error::CompilationError,
+    parse_error,
 };
 use log::debug;
 
@@ -17,13 +18,6 @@ use std::str::FromStr;
 
 type CompileResult<T> = Result<T, CompilationError>;
 
-pub enum Optimizations {
-    // Should be handled by the compiler itself
-    Simple = 1,
-    Medium = 2,
-    Aggressive = 3,
-}
-
 pub struct Compiler {
     files: Vec<PathBuf>,
     output: PathBuf,
@@ -31,10 +25,11 @@ pub struct Compiler {
     libs: Vec<String>,
 }
 
-/// Returns None when the string is not escaped
 // TODO: this might be useful in other places
 #[allow(dead_code)]
 fn unescape(s: impl AsRef<str>) -> Option<String> {
+    // TODO: search if there is an escape sequence beforehand to
+    // avoid the allocation and search logic
     let s = s.as_ref();
     let mut out = String::with_capacity(s.len());
     let mut chars = s.chars();
@@ -70,6 +65,12 @@ impl Compiler {
     fn parse(&mut self) -> CompileResult<Program> {
         let mut includes = Vec::new();
         let mut functions = Vec::new();
+
+        // TODO: track which files are UTF-8 formatted:
+        // - true = UTF-8
+        // - false = binary (NOT ACCEPTED)
+        // each files correspond to an index in the `files` vector
+        let _files = vec![false; self.files.len()];
 
         for file in &self.files {
             let input = std::fs::read_to_string(file).map_err(CompilationError::Io)?;
@@ -170,6 +171,7 @@ impl Compiler {
                     Rule::var_decl => self.parse_var_decl(inner),
                     Rule::expr_stmt => self.parse_expr_stmt(inner),
                     Rule::return_stmt => self.parse_return(inner),
+                    Rule::if_stmt => self.parse_if_stmt(inner),
                     other => Err(CompilationError::ParseError(format!(
                         "unexpected statement: {:?}",
                         other
@@ -203,9 +205,7 @@ impl Compiler {
             }
         }
 
-        let name = name.ok_or(CompilationError::ParseError(
-            "var_decl missing identifier".to_string(),
-        ))?;
+        let name = name.ok_or(parse_error!("var_decl missing identifier"))?;
         Ok(Stmt::VarDecl { name, ty, init })
     }
 
@@ -246,12 +246,46 @@ impl Compiler {
         Ok(Stmt::Return(expr))
     }
 
+    fn parse_if_stmt(&self, pair: Pair<Rule>) -> CompileResult<Stmt> {
+        // if_stmt = { "if" ~ expr ~ block ~ else_part? }
+        // else_part = { "else" ~ (block | if_stmt) }
+        let mut inner = pair.into_inner();
+        let cond = self.parse_expr(inner.next().unwrap())?;
+        let then_branch = self.parse_block(inner.next().unwrap())?;
+
+        let mut else_branch = None;
+        if let Some(else_pair) = inner.next() {
+            assert_eq!(else_pair.as_rule(), Rule::else_part);
+            let else_content = else_pair.into_inner().next().unwrap();
+            let else_block = match else_content.as_rule() {
+                Rule::block => self.parse_block(else_content)?,
+                Rule::if_stmt => {
+                    let if_stmt = self.parse_if_stmt(else_content)?;
+                    Block {
+                        stmts: vec![if_stmt],
+                    }
+                }
+                _ => unreachable!(),
+            };
+            else_branch = Some(else_block);
+        }
+
+        Ok(Stmt::If {
+            cond,
+            then_branch,
+            else_branch,
+        })
+    }
+
     fn parse_expr(&self, pair: Pair<Rule>) -> CompileResult<Expr> {
-        // first, peel off any of the wrapper rules:
         match pair.as_rule() {
-            Rule::expr
-            | Rule::assign
-            | Rule::logical_or
+            Rule::expr => {
+                // SAFETY: Grammar guarantees exactly one child for wrapper rules
+                let inner = pair.into_inner().next().unwrap();
+                self.parse_expr(inner)
+            }
+            Rule::assign => self.parse_assign_expr(pair),
+            Rule::logical_or
             | Rule::logical_and
             | Rule::equality
             | Rule::comparison
@@ -261,15 +295,24 @@ impl Compiler {
             | Rule::bitwise_xor
             | Rule::bitwise_and
             | Rule::shift => {
-                // SAFETY: Grammar guarantees exactly one child for wrapper rules
-                let inner = pair.into_inner().next().unwrap();
-                return self.parse_expr(inner);
-            }
-            _ => { /* Do nothing here, fall through to the next match */ }
-        }
+                let mut inner = pair.into_inner();
+                // The first child is the left-hand operand.
+                // The recursive call to parse_expr will handle the correct precedence for this operand.
+                let mut left = self.parse_expr(inner.next().unwrap())?;
 
-        // now handle the real terminals
-        match pair.as_rule() {
+                while let Some(op_pair) = inner.next() {
+                    let op = BinaryOperator::from_rule_pair(&op_pair)?;
+                    // The next child is the right-hand operand.
+                    // The recursive call to parse_expr will handle the correct precedence for this operand.
+                    let right = self.parse_expr(inner.next().unwrap())?;
+                    left = Expr::BinaryOp {
+                        op,
+                        left: Box::new(left),
+                        right: Box::new(right),
+                    };
+                }
+                Ok(left)
+            }
             Rule::unary => {
                 let mut inner_pairs = pair.into_inner();
                 // SAFETY: Unary rule always has at least one child
@@ -278,12 +321,8 @@ impl Compiler {
                 match first_pair.as_rule() {
                     Rule::unary_op => {
                         let op_str = first_pair.as_str();
-                        let op = UnaryOperator::from_str(op_str).map_err(|_| {
-                            CompilationError::ParseError(format!(
-                                "invalid unary operation: {}",
-                                op_str
-                            ))
-                        })?;
+                        let op = UnaryOperator::from_str(op_str)
+                            .map_err(|_| parse_error!("invalid unary operation: {}", op_str))?;
 
                         // SAFETY: Grammar guarantees expression after unary op
                         let expr = self.parse_expr(inner_pairs.next().unwrap())?;
@@ -293,10 +332,7 @@ impl Compiler {
                         })
                     }
                     Rule::primary => self.parse_expr(first_pair),
-                    other => Err(CompilationError::ParseError(format!(
-                        "Unexpected rule in unary: {:?}",
-                        other
-                    ))),
+                    _other => Err(parse_error!("Unexpected rule in unary: {:?}", _other)),
                 }
             }
             Rule::identifier => Ok(Expr::Identifier(pair.as_str().to_string())),
@@ -311,43 +347,30 @@ impl Compiler {
                             Rule::integer => {
                                 let s = num_pair.as_str();
                                 let i = s.parse::<i64>().map_err(|e| {
-                                    CompilationError::ParseError(format!(
-                                        "invalid integer literal '{}': {}",
-                                        s, e
-                                    ))
+                                    parse_error!("invalid integer literal '{s}': {:?}", e)
                                 })?;
                                 Ok(Expr::Literal(Literal::Int(i)))
                             }
                             Rule::float => {
                                 let s = num_pair.as_str();
                                 let f = s.parse::<f64>().map_err(|e| {
-                                    CompilationError::ParseError(format!(
-                                        "invalid float literal '{}': {}",
-                                        s, e
-                                    ))
+                                    parse_error!("invalid float literal '{s}': {:?}", e)
                                 })?;
                                 Ok(Expr::Literal(Literal::Float(f)))
                             }
-                            _ => Err(CompilationError::ParseError(
-                                "Unexpected number type".to_string(),
-                            )),
+                            _ => Err(parse_error!("Unexpected number type")),
                         }
                     }
                     Rule::boolean => match inner.as_str() {
                         "true" => Ok(Expr::Literal(Literal::Bool(true))),
                         "false" => Ok(Expr::Literal(Literal::Bool(false))),
-                        s => Err(CompilationError::ParseError(format!(
-                            "invalid boolean literal: {}",
-                            s
-                        ))),
+                        _s => Err(parse_error!("invalid boolean literal: {}", _s)),
                     },
-                    Rule::char_literal => Err(CompilationError::ParseError(
-                        "char literal parsing not implemented".to_string(),
-                    )),
-                    _ => Err(CompilationError::ParseError(format!(
+                    Rule::char_literal => todo!("char literal parsing not implemented"),
+                    _ => Err(parse_error!(
                         "Unexpected literal type: {:?}",
                         inner.as_rule()
-                    ))),
+                    )),
                 }
             }
             Rule::string => {
@@ -365,6 +388,17 @@ impl Compiler {
                     .map(|p: Pair<Rule>| self.parse_expr(p))
                     .collect::<Result<Vec<_>, _>>()?; // Collect and propagate errors
                 Ok(Expr::Call { callee, args })
+            }
+            Rule::if_expr => {
+                let mut inner = pair.into_inner();
+                let cond = self.parse_expr(inner.next().unwrap())?;
+                let then_branch = self.parse_expr(inner.next().unwrap())?;
+                let else_branch = self.parse_expr(inner.next().unwrap())?;
+                Ok(Expr::If {
+                    cond: Box::new(cond),
+                    then_branch: Box::new(then_branch),
+                    else_branch: Box::new(else_branch),
+                })
             }
             Rule::primary => {
                 // SAFETY: Primary rule always has exactly one child
@@ -507,6 +541,20 @@ impl Compiler {
                         .map_or(String::new(), |e| format!(" {}", self.transpile_expr(e)));
                     code.push_str(&format!("return{};\n", expr_str));
                 }
+                Stmt::If {
+                    cond,
+                    then_branch,
+                    else_branch,
+                } => {
+                    let cond_str = self.transpile_expr(cond);
+                    let then_code = self.transpile_block(then_branch);
+                    let mut if_str = format!("if ({}) {{\n{}}}", cond_str, then_code);
+                    if let Some(else_b) = else_branch {
+                        let else_code = self.transpile_block(else_b);
+                        if_str.push_str(&format!(" else {{\n{}}}", else_code));
+                    }
+                    code.push_str(&if_str);
+                }
             }
         }
         code
@@ -529,11 +577,56 @@ impl Compiler {
                 let expr_str = self.transpile_expr(expr);
                 op.to_string_with_expr(expr_str)
             }
+            Expr::BinaryOp { op, left, right } => {
+                let left_str = self.transpile_expr(left);
+                let right_str = self.transpile_expr(right);
+                format!("({} {} {})", left_str, op.to_c_str(), right_str)
+            }
+            Expr::If {
+                cond,
+                then_branch,
+                else_branch,
+            } => {
+                let cond_str = self.transpile_expr(cond);
+                let then_str = self.transpile_expr(then_branch);
+                let else_str = self.transpile_expr(else_branch);
+                format!("({}) ? ({}) : ({})", cond_str, then_str, else_str)
+            }
+            Expr::Assign { op, left, right } => {
+                let left_str = self.transpile_expr(left);
+                let right_str = self.transpile_expr(right);
+                format!("({} {} {})", left_str, op.to_c_str(), right_str)
+            }
         }
     }
 
     fn transpile_type(&self, ty: &Type) -> String {
         ty.to_c_repr().name
+    }
+
+    /// Parses an assignment expression (right-associative).
+    fn parse_assign_expr(&self, pair: Pair<Rule>) -> CompileResult<Expr> {
+        let mut inner = pair.into_inner();
+        let left_pair = inner.next().unwrap();
+
+        // The LHS of an assignment can be a logical_or expression
+        // We'll parse it as such, but it might not be a valid l-value
+        // This check will happen during semantic analysis
+        let left = self.parse_expr(left_pair)?;
+
+        if let Some(op_pair) = inner.next() {
+            let op = AssignmentOperator::from_rule_pair(&op_pair)?;
+            // Assignment is right-associative, so parse the right-hand side as another assign expr
+            let right = self.parse_assign_expr(inner.next().unwrap())?;
+            Ok(Expr::Assign {
+                op,
+                left: Box::new(left),
+                right: Box::new(right),
+            })
+        } else {
+            // If there's no operator, it's just the left-hand side expression
+            Ok(left)
+        }
     }
 
     pub fn compile(&mut self) -> CompileResult<()> {
@@ -552,6 +645,7 @@ impl Compiler {
             .output
             .file_stem()
             .ok_or(CompilationError::InvalidOutputPath)?;
+
         let exe_name = exe_stem
             .to_str()
             .ok_or(CompilationError::InvalidOutputPath)?

@@ -1,3 +1,6 @@
+use crate::Rule;
+use crate::error::CompilationError;
+use pest::iterators::Pair;
 use std::collections::HashSet;
 use std::str::FromStr;
 
@@ -138,6 +141,15 @@ pub enum Stmt {
     Expr(Expr),
     /// Return statement (with optional return value).
     Return(Option<Expr>),
+    /// If-else statement.
+    If {
+        /// The condition to evaluate.
+        cond: Expr,
+        /// The block to execute if the condition is true.
+        then_branch: Block,
+        /// The block to execute if the condition is false.
+        else_branch: Option<Block>,
+    },
 }
 
 /// Unary operators supported in Kit expressions.
@@ -161,6 +173,7 @@ pub enum UnaryOperator {
 
 impl UnaryOperator {
     /// Formats the operator with its operand as a C expression string.
+    /// e.g. `to_string_with_expr("++", "x") -> "++x"`
     pub fn to_string_with_expr(&self, expr: impl Into<String>) -> String {
         let expr = expr.into();
         match self {
@@ -195,6 +208,204 @@ impl FromStr for UnaryOperator {
     }
 }
 
+/// Binary operators supported in Kit expressions.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum BinaryOperator {
+    /// Additive
+    Add,
+    /// Subtractive: `-`
+    Subtract,
+    // Multiplicative
+    Multiply,
+    /// Divide
+    Divide,
+    /// Modulo
+    Modulo,
+    /// Equality
+    Eq,
+    /// Negative equality
+    Neq,
+    /// Greater than
+    Gt,
+    /// Greater than or equal
+    Gte,
+    /// Less than
+    Lt,
+    /// Less than or equal
+    Lte,
+    // Logical
+    And,
+    /// Logical
+    Or,
+    /// Bitwise AND
+    BitwiseAnd,
+    /// Bitwise OR
+    BitwiseOr,
+    /// Bitwise XOR
+    BitwiseXor,
+    /// Bitwise left shift
+    BitwiseLeftShift,
+    /// Bitwise right shift
+    BitwiseRightShift,
+}
+
+impl BinaryOperator {
+    pub fn from_rule_pair(pair: &Pair<Rule>) -> Result<Self, CompilationError> {
+        match pair.as_rule() {
+            Rule::additive_op => match pair.as_str() {
+                "+" => Ok(BinaryOperator::Add),
+                "-" => Ok(BinaryOperator::Subtract),
+                _ => Err(CompilationError::InvalidOperator(format!(
+                    "Unknown additive operator: {}",
+                    pair.as_str()
+                ))),
+            },
+            Rule::multiplicative_op => match pair.as_str() {
+                "*" => Ok(BinaryOperator::Multiply),
+                "/" => Ok(BinaryOperator::Divide),
+                "%" => Ok(BinaryOperator::Modulo),
+                _ => Err(CompilationError::InvalidOperator(format!(
+                    "Unknown multiplicative operator: {}",
+                    pair.as_str()
+                ))),
+            },
+            Rule::eq_op => match pair.as_str() {
+                "==" => Ok(BinaryOperator::Eq),
+                "!=" => Ok(BinaryOperator::Neq),
+                _ => Err(CompilationError::InvalidOperator(format!(
+                    "Unknown equality operator: {}",
+                    pair.as_str()
+                ))),
+            },
+            Rule::comp_op => match pair.as_str() {
+                ">" => Ok(BinaryOperator::Gt),
+                ">=" => Ok(BinaryOperator::Gte),
+                "<" => Ok(BinaryOperator::Lt),
+                "<=" => Ok(BinaryOperator::Lte),
+                _ => Err(CompilationError::InvalidOperator(format!(
+                    "Unknown comparison operator: {}",
+                    pair.as_str()
+                ))),
+            },
+            Rule::logical_and_op => Ok(BinaryOperator::And),
+            Rule::logical_or_op => Ok(BinaryOperator::Or),
+            Rule::bitwise_and_op => Ok(BinaryOperator::BitwiseAnd),
+            Rule::bitwise_or_op => Ok(BinaryOperator::BitwiseOr),
+            Rule::bitwise_xor_op => Ok(BinaryOperator::BitwiseXor),
+            Rule::shift_op => match pair.as_str() {
+                "<<" => Ok(BinaryOperator::BitwiseLeftShift),
+                ">>" => Ok(BinaryOperator::BitwiseRightShift),
+                _ => Err(CompilationError::InvalidOperator(format!(
+                    "Unknown shift operator: {}",
+                    pair.as_str()
+                ))),
+            },
+            _ => Err(CompilationError::InvalidOperator(format!(
+                "Unexpected rule for binary operator: {:?}",
+                pair.as_rule()
+            ))),
+        }
+    }
+}
+
+impl BinaryOperator {
+    pub fn to_c_str(&self) -> &'static str {
+        match self {
+            BinaryOperator::Add => "+",
+            BinaryOperator::Subtract => "-",
+            BinaryOperator::Multiply => "*",
+            BinaryOperator::Divide => "/",
+            BinaryOperator::Modulo => "%",
+            BinaryOperator::Eq => "==",
+            BinaryOperator::Neq => "!=",
+            BinaryOperator::Gt => ">",
+            BinaryOperator::Gte => ">=",
+            BinaryOperator::Lt => "<",
+            BinaryOperator::Lte => "<=",
+            BinaryOperator::And => "&&",
+            BinaryOperator::Or => "||",
+            BinaryOperator::BitwiseAnd => "&",
+            BinaryOperator::BitwiseOr => "|",
+            BinaryOperator::BitwiseXor => "^",
+            BinaryOperator::BitwiseLeftShift => "<<",
+            BinaryOperator::BitwiseRightShift => ">>",
+        }
+    }
+}
+
+/// Assignment operators supported in Kit expressions.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum AssignmentOperator {
+    /// Simple assignment (`=`).
+    Assign,
+    /// Add and assign (`+=`).
+    AddAssign,
+    /// Subtract and assign (`-=`).
+    SubtractAssign,
+    /// Multiply and assign (`*=`).
+    MultiplyAssign,
+    /// Divide and assign (`/=`).
+    DivideAssign,
+    /// Modulo and assign (`%=`).
+    ModuloAssign,
+    /// Bitwise AND and assign (`&=`).
+    BitwiseAndAssign,
+    /// Bitwise OR and assign (`|=`).
+    BitwiseOrAssign,
+    /// Bitwise XOR and assign (`^=`).
+    BitwiseXorAssign,
+    /// Bitwise left shift and assign (`<<=`).
+    BitwiseLeftShiftAssign,
+    /// Bitwise right shift and assign (`>>=`).
+    BitwiseRightShiftAssign,
+}
+
+impl AssignmentOperator {
+    pub fn from_rule_pair(pair: &Pair<Rule>) -> Result<Self, CompilationError> {
+        match pair.as_rule() {
+            Rule::assign_op => match pair.as_str() {
+                "=" => Ok(AssignmentOperator::Assign),
+                "+=" => Ok(AssignmentOperator::AddAssign),
+                "-=" => Ok(AssignmentOperator::SubtractAssign),
+                "*=" => Ok(AssignmentOperator::MultiplyAssign),
+                "/=" => Ok(AssignmentOperator::DivideAssign),
+                "%=" => Ok(AssignmentOperator::ModuloAssign),
+                "&=" => Ok(AssignmentOperator::BitwiseAndAssign),
+                "|=" => Ok(AssignmentOperator::BitwiseOrAssign),
+                "^=" => Ok(AssignmentOperator::BitwiseXorAssign),
+                "<<=" => Ok(AssignmentOperator::BitwiseLeftShiftAssign),
+                ">>=" => Ok(AssignmentOperator::BitwiseRightShiftAssign),
+                _ => Err(CompilationError::InvalidOperator(format!(
+                    "Unknown assignment operator: {}",
+                    pair.as_str()
+                ))),
+            },
+            _ => Err(CompilationError::InvalidOperator(format!(
+                "Unexpected rule for assignment operator: {:?}",
+                pair.as_rule()
+            ))),
+        }
+    }
+}
+
+impl AssignmentOperator {
+    pub fn to_c_str(&self) -> &'static str {
+        match self {
+            AssignmentOperator::Assign => "=",
+            AssignmentOperator::AddAssign => "+=",
+            AssignmentOperator::SubtractAssign => "-=",
+            AssignmentOperator::MultiplyAssign => "*=",
+            AssignmentOperator::DivideAssign => "/=",
+            AssignmentOperator::ModuloAssign => "%=",
+            AssignmentOperator::BitwiseAndAssign => "&=",
+            AssignmentOperator::BitwiseOrAssign => "|=",
+            AssignmentOperator::BitwiseXorAssign => "^=",
+            AssignmentOperator::BitwiseLeftShiftAssign => "<<=",
+            AssignmentOperator::BitwiseRightShiftAssign => ">>=",
+        }
+    }
+}
+
 /// Represents an expression in Kit.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Expr {
@@ -215,6 +426,27 @@ pub enum Expr {
         op: UnaryOperator,
         /// The operand expression.
         expr: Box<Expr>,
+    },
+    /// Binary operation.
+    BinaryOp {
+        op: BinaryOperator,
+        left: Box<Expr>,
+        right: Box<Expr>,
+    },
+    /// Assignment operation.
+    Assign {
+        op: AssignmentOperator,
+        left: Box<Expr>,
+        right: Box<Expr>,
+    },
+    /// If-then-else expression.
+    If {
+        /// The condition to evaluate.
+        cond: Box<Expr>,
+        /// The expression to evaluate if the condition is true.
+        then_branch: Box<Expr>,
+        /// The expression to evaluate if the condition is false.
+        else_branch: Box<Expr>,
     },
 }
 
@@ -355,15 +587,22 @@ fn type_to_c_ident_string(t: &Type) -> String {
 
 impl ToCRepr for Type {
     fn to_c_repr(&self) -> CType {
+        // small helper to reduce repetition for header-backed types
+        fn hdr(name: &str, header: &str) -> CType {
+            CType::with_header(name, header)
+        }
+
         match self {
-            Type::Int8 => CType::with_header("int8_t", "<stdint.h>"),
-            Type::Int16 => CType::with_header("int16_t", "<stdint.h>"),
-            Type::Int32 => CType::with_header("int32_t", "<stdint.h>"),
-            Type::Int64 => CType::with_header("int64_t", "<stdint.h>"),
-            Type::Uint8 => CType::with_header("uint8_t", "<stdint.h>"),
-            Type::Uint16 => CType::with_header("uint16_t", "<stdint.h>"),
-            Type::Uint32 => CType::with_header("uint32_t", "<stdint.h>"),
-            Type::Uint64 => CType::with_header("uint64_t", "<stdint.h>"),
+            // fixed-width integer types -> <stdint.h>
+            Type::Int8 => hdr("int8_t", "<stdint.h>"),
+            Type::Int16 => hdr("int16_t", "<stdint.h>"),
+            Type::Int32 => hdr("int32_t", "<stdint.h>"),
+            Type::Int64 => hdr("int64_t", "<stdint.h>"),
+            Type::Uint8 => hdr("uint8_t", "<stdint.h>"),
+            Type::Uint16 => hdr("uint16_t", "<stdint.h>"),
+            Type::Uint32 => hdr("uint32_t", "<stdint.h>"),
+            Type::Uint64 => hdr("uint64_t", "<stdint.h>"),
+
             Type::Float32 => CType::new("float"),
             Type::Float64 => CType::new("double"),
             Type::Int => CType::new("int"),
@@ -372,59 +611,74 @@ impl ToCRepr for Type {
             Type::Char => CType::new("char"),
             Type::Bool => CType::with_header("bool", "<stdbool.h>"),
             Type::CString => CType::new("char*"),
+
             Type::Ptr(inner) => {
                 let mut c = inner.to_c_repr();
-                // Add pointer asterisk to the type name
-                c.name.push('*');
+                c.name = format!("{}*", c.name); // clearer than push
                 c
             }
+
+            // Transform a tuple type into a C struct definition
             Type::Tuple(fields) => {
+                // Mangle each field's C identifier and join with '_', e.g., "i32_f64_..."
+                // to avoid name conflicts when tuples with same size have different types.
+                // In practice, this makes (Int, Int) and (Float, Float) two entirely
+                // different types when converted to C.
                 let type_names_mangled = fields
                     .iter()
                     .map(type_to_c_ident_string)
                     .collect::<Vec<_>>()
                     .join("_");
 
+                // Build a unique struct name using the mangled field list
                 let struct_name = format!("__KitTuple_{}", type_names_mangled);
 
+                // Collect all required headers and declarations from the fields
                 let mut all_headers = HashSet::new();
                 let mut all_declarations = Vec::new();
 
+                // Generate the struct members (like "int _0;") and gather headers/decls
                 let members = fields
                     .iter()
                     .enumerate()
                     .map(|(i, f)| {
                         let c = f.to_c_repr();
-                        for header in &c.headers {
-                            all_headers.insert(header.clone());
+
+                        // collect needed headers and declarations
+                        all_headers.extend(c.headers);
+                        if let Some(decl) = c.declaration {
+                            all_declarations.push(decl);
                         }
-                        if let Some(decl) = &c.declaration {
-                            all_declarations.push(decl.clone());
-                        }
-                        format!("    {} _{};\n", c.name, i)
+
+                        format!("    {} _{};\n", c.name, i) // struct member line
                     })
                     .collect::<String>();
 
+                // Append the full typedef for the tuple struct
                 all_declarations.push(format!(
                     "typedef struct {{\n{}}} {};\n",
                     members, struct_name
                 ));
 
+                // Return the C type description for the tuple
                 CType {
                     name: struct_name,
                     headers: all_headers.into_iter().collect(),
                     declaration: Some(all_declarations.join("\n")),
                 }
             }
+
+            // Transform a C-array type
             Type::CArray(elem, len) => {
                 let base = elem.to_c_repr();
+
+                // Fixed-size array, like int[10]
                 if let Some(n) = len {
-                    // Fixed-size array: int[10]
                     let mut ctype = base;
                     ctype.name = format!("{}[{}]", ctype.name, n);
                     ctype
+                // Variable-length array: convert to wrapper struct with length + pointer
                 } else {
-                    // Variable-length array: represented as struct { size_t len; T* data; }
                     let type_name_mangled = type_to_c_ident_string(elem);
                     let struct_name = format!("__KitArray_{}", type_name_mangled);
                     let decl = format!(
@@ -432,6 +686,7 @@ impl ToCRepr for Type {
                         base.name, struct_name
                     );
 
+                    // Gather headers (need <stddef.h> for size_t) and any nested decls
                     let mut all_headers: HashSet<String> = base.headers.into_iter().collect();
                     all_headers.insert("<stddef.h>".to_string());
 
@@ -448,6 +703,7 @@ impl ToCRepr for Type {
                     }
                 }
             }
+
             // User-defined types are assumed to be already declared elsewhere
             Type::Named(name) => CType::new(name.to_string()),
         }
