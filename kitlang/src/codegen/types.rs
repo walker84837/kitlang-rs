@@ -84,6 +84,7 @@ impl Type {
             "Char" => Type::Char,
             "Size" => Type::Size,
             "CString" => Type::CString,
+            "Bool" => Type::Bool,
             other => Type::Named(other.to_string()),
         }
     }
