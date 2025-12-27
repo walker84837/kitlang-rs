@@ -1,0 +1,21 @@
+include "stdio.h";
+
+function logical_and(a: Bool, b: Bool): Bool {
+    return a && b;
+}
+
+function main(): Int {
+    var bool1: Bool = true;
+    var bool2: Bool = false;
+    var resultBool: Bool;
+
+    resultBool = logical_and(bool1, bool2);
+
+    if (resultBool) {
+        printf("true\n");
+        return 1;
+    } else {
+	printf("false\n");
+        return 0;
+    }
+}

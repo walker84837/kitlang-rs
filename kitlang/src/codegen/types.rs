@@ -71,6 +71,8 @@ pub enum Type {
     ///
     /// The second field is `Some(n)` for fixed-size arrays or `None` for variable-length arrays.
     CArray(Box<Type>, Option<usize>),
+    /// Represents a void type (e.g., for functions with no return value).
+    Void,
 }
 
 impl Type {
@@ -85,6 +87,7 @@ impl Type {
             "Size" => Type::Size,
             "CString" => Type::CString,
             "Bool" => Type::Bool,
+            "Void" => Type::Void,
             other => Type::Named(other.to_string()),
         }
     }
@@ -93,7 +96,7 @@ impl Type {
 /// Represents a C header inclusion.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Include {
-    /// Path to the header file (e.g., "stdio.h" or "<stdio.h>").
+    /// Path to the header file (e.g., "stdio.h").
     pub path: String,
 }
 
@@ -288,10 +291,13 @@ impl BinaryOperator {
                     pair.as_str()
                 ))),
             },
-            Rule::logical_and_op => Ok(BinaryOperator::And),
-            Rule::logical_or_op => Ok(BinaryOperator::Or),
-            Rule::bitwise_and_op => Ok(BinaryOperator::BitwiseAnd),
-            Rule::bitwise_or_op => Ok(BinaryOperator::BitwiseOr),
+            Rule::and_ops => match pair.as_str() {
+                "&&" => Ok(BinaryOperator::And),
+                "&" => Ok(BinaryOperator::BitwiseAnd),
+                _ => unreachable!(), // Should not happen with atomic rules
+            },
+            Rule::logical_or_op => Ok(BinaryOperator::Or), // Use new logical_or_op
+            Rule::bitwise_or_op => Ok(BinaryOperator::BitwiseOr), // Use new bitwise_or_op
             Rule::bitwise_xor_op => Ok(BinaryOperator::BitwiseXor),
             Rule::shift_op => match pair.as_str() {
                 "<<" => Ok(BinaryOperator::BitwiseLeftShift),
@@ -364,7 +370,7 @@ pub enum AssignmentOperator {
 impl AssignmentOperator {
     pub fn from_rule_pair(pair: &Pair<Rule>) -> Result<Self, CompilationError> {
         match pair.as_rule() {
-            Rule::assign_op => match pair.as_str() {
+            Rule::ASSIGN_OP => match pair.as_str() {
                 "=" => Ok(AssignmentOperator::Assign),
                 "+=" => Ok(AssignmentOperator::AddAssign),
                 "-=" => Ok(AssignmentOperator::SubtractAssign),
@@ -583,6 +589,7 @@ fn type_to_c_ident_string(t: &Type) -> String {
             format!("__KitTuple_{}", member_types)
         }
         Type::CArray(inner, _) => format!("{}__KitArray", type_to_c_ident_string(inner)),
+        Type::Void => "void".to_string(),
     }
 }
 
@@ -704,6 +711,7 @@ impl ToCRepr for Type {
                     }
                 }
             }
+            Type::Void => CType::new("void"),
 
             // User-defined types are assumed to be already declared elsewhere
             Type::Named(name) => CType::new(name.to_string()),

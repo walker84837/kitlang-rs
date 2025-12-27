@@ -114,3 +114,8 @@ fn test_if_else() -> Result<(), Box<dyn std::error::Error>> {
 fn test_precedence() -> Result<(), Box<dyn std::error::Error>> {
     run_example_test("precedence", None)
 }
+
+#[test]
+fn test_basic_features() -> Result<(), Box<dyn std::error::Error>> {
+    run_example_test("basic_features", None)
+}

@@ -137,6 +137,29 @@ impl Toolchain {
     pub const fn is_unix_like(&self) -> bool {
         matches!(self, Toolchain::Gcc | Toolchain::Clang)
     }
+
+    pub fn get_compiler_flags(&self) -> Vec<String> {
+        match self {
+            Toolchain::Gcc | Toolchain::Clang => {
+                let flags = ["-std=c99", "-Wall", "-Wextra", "-pedantic"];
+                // The C compiler (gcc/clang) by default searches standard system include paths
+                // so we don't necessarily need to add -I/usr/include explicitly here
+                // unless we want to override or add specific custom paths.
+                // convert it to a vector of strings
+                flags.iter().map(|s| s.to_string()).collect()
+            }
+            #[cfg(windows)]
+            Toolchain::Msvc => {
+                // MSVC equivalent flags for C99 (or closest standard)
+                // /std:c11 or /std:c17 for newer, /Za for ANSI C compliance
+                vec!["/std:c11".to_string(), "/W4".to_string()] // /W4 for high warning level
+            }
+            Toolchain::Other => {
+                // For unknown toolchains, return minimal safe flags
+                vec![]
+            }
+        }
+    }
 }
 
 /// `cc` is often a symlink to an actual compiler on the system, so

@@ -7,8 +7,6 @@ use crate::{
     error::CompilationError,
     parse_error,
 };
-use log::debug;
-
 use pest::{Parser, iterators::Pair};
 
 use std::collections::HashSet;
@@ -99,14 +97,14 @@ impl Compiler {
     fn parse_include(&self, pair: Pair<Rule>) -> Include {
         // include_stmt = { "include" ~ string ~ ("=>" ~ string)? ~ ";" }
         let mut inner = pair.into_inner();
-        // SAFETY: Grammar guarantees at least one child (the string literal)
-        let lit = inner.next().unwrap().as_str();
+        // The first child is the string literal representing the include path
+        let path_literal_pair = inner.next().unwrap();
+        let path_str = path_literal_pair.as_str();
 
-        // lit includes the quotes, so strip them
-        let path = lit[1..lit.len() - 1].to_string();
+        // Strip the quotes from the string literal
+        let path = path_str[1..path_str.len() - 1].to_string();
         Include { path }
     }
-
     fn parse_function(&self, pair: Pair<Rule>) -> CompileResult<Function> {
         let mut inner = pair.into_inner();
 
@@ -210,19 +208,26 @@ impl Compiler {
     }
 
     fn parse_type(&self, pair: Pair<Rule>) -> CompileResult<Type> {
-        let mut inner = pair.into_inner();
-        // SAFETY: Grammar guarantees at least base type exists
-        let base = inner.next().unwrap().as_str().trim();
-        // turn known names into their enum cases
-        let mut ty = Type::from_kit(base);
-
-        // if there are array or pointer annotations, handle here…
-        for sub in inner {
-            // you can extend to multi-dimensional or pointer types
-            let inner_ty = self.parse_type(sub)?;
-            ty = Type::Ptr(Box::new(inner_ty));
+        let inner_rule = pair.into_inner().next().unwrap(); // Get the actual type rule (base_type, pointer_type, etc.)
+        match inner_rule.as_rule() {
+            Rule::base_type => {
+                let mut inner_base_type = inner_rule.into_inner();
+                let base_name = inner_base_type.next().unwrap().as_str().trim();
+                // For now, assume no complex array types directly from parsing this,
+                // and defer full array parsing if needed.
+                Ok(Type::from_kit(base_name))
+            }
+            Rule::pointer_type => {
+                let inner_ptr_type = inner_rule.into_inner().next().unwrap(); // Get the type being pointed to
+                let inner_ty = self.parse_type(inner_ptr_type)?;
+                Ok(Type::Ptr(Box::new(inner_ty)))
+            }
+            // TODO: Handle other type_annotation rules like function_type, tuple_type
+            _ => Err(CompilationError::ParseError(format!(
+                "Unexpected rule in type_annotation: {:?}",
+                inner_rule.as_rule()
+            ))),
         }
-        Ok(ty)
     }
 
     fn transpile_with_program(&mut self, prog: Program) {
@@ -296,14 +301,10 @@ impl Compiler {
             | Rule::bitwise_and
             | Rule::shift => {
                 let mut inner = pair.into_inner();
-                // The first child is the left-hand operand.
-                // The recursive call to parse_expr will handle the correct precedence for this operand.
                 let mut left = self.parse_expr(inner.next().unwrap())?;
 
                 while let Some(op_pair) = inner.next() {
                     let op = BinaryOperator::from_rule_pair(&op_pair)?;
-                    // The next child is the right-hand operand.
-                    // The recursive call to parse_expr will handle the correct precedence for this operand.
                     let right = self.parse_expr(inner.next().unwrap())?;
                     left = Expr::BinaryOp {
                         op,
@@ -325,6 +326,15 @@ impl Compiler {
                             .map_err(|_| parse_error!("invalid unary operation: {}", op_str))?;
 
                         // SAFETY: Grammar guarantees expression after unary op
+                        let expr = self.parse_expr(inner_pairs.next().unwrap())?;
+                        Ok(Expr::UnaryOp {
+                            op,
+                            expr: Box::new(expr),
+                        })
+                    }
+                    Rule::ADDRESS_OF_OP => {
+                        // Handle address-of operator explicitly
+                        let op = UnaryOperator::AddressOf; // This is always AddressOf
                         let expr = self.parse_expr(inner_pairs.next().unwrap())?;
                         Ok(Expr::UnaryOp {
                             op,
@@ -417,11 +427,8 @@ impl Compiler {
 
         // emit regular includes from the source `include` statements
         for inc in &prog.includes {
-            let line = if inc.path.starts_with('<') || inc.path.ends_with(".h>") {
-                format!("#include {}\n", inc.path)
-            } else {
-                format!("#include \"{}\"\n", inc.path.trim_matches('"'))
-            };
+            // Emit as #include "path" as per C preprocessor rules for Kit includes.
+            let line = format!("#include \"{}\"\n", inc.path);
             out.push_str(&line);
         }
 
@@ -483,11 +490,8 @@ impl Compiler {
         } else {
             func.return_type
                 .as_ref()
-                .map(|t| self.transpile_type(t))
-                .unwrap_or_else(|| "void".to_string())
+                .map_or("void".to_string(), |t| self.transpile_type(t))
         };
-
-        debug!("return type: {}", return_type);
 
         let params = func
             .params
@@ -561,7 +565,6 @@ impl Compiler {
     }
 
     fn transpile_expr(&self, expr: &Expr) -> String {
-        debug!("Transpiling expr: {:#?}", expr);
         match expr {
             Expr::Identifier(id) => id.clone(),
             Expr::Literal(lit) => lit.to_c(),
@@ -607,24 +610,26 @@ impl Compiler {
     /// Parses an assignment expression (right-associative).
     fn parse_assign_expr(&self, pair: Pair<Rule>) -> CompileResult<Expr> {
         let mut inner = pair.into_inner();
-        let left_pair = inner.next().unwrap();
+        let left_pair = inner.next().unwrap(); // This is always the LHS (logical_or)
 
-        // The LHS of an assignment can be a logical_or expression
-        // We'll parse it as such, but it might not be a valid l-value
-        // This check will happen during semantic analysis
         let left = self.parse_expr(left_pair)?;
 
-        if let Some(op_pair) = inner.next() {
-            let op = AssignmentOperator::from_rule_pair(&op_pair)?;
-            // Assignment is right-associative, so parse the right-hand side as another assign expr
-            let right = self.parse_assign_expr(inner.next().unwrap())?;
+        // The grammar rule for `assign` is `assign = { logical_or ~ ASSIGN_OP ~ assign | logical_or }`.
+        // This means `inner.next()` after the LHS (`logical_or`) will yield `ASSIGN_OP` if it's an assignment.
+        // If there's no assignment, `inner` will be exhausted.
+
+        if let Some(assign_op_pair) = inner.next() {
+            // This should be ASSIGN_OP
+            let op = AssignmentOperator::from_rule_pair(&assign_op_pair)?;
+            let right_assign_expr_pair = inner.next().unwrap(); // This should be the RHS (nested assign)
+            let right = self.parse_assign_expr(right_assign_expr_pair)?;
             Ok(Expr::Assign {
                 op,
                 left: Box::new(left),
                 right: Box::new(right),
             })
         } else {
-            // If there's no operator, it's just the left-hand side expression
+            // No assignment operator, so it's just the expression itself (the logical_or that formed the LHS)
             Ok(left)
         }
     }
@@ -668,6 +673,11 @@ impl Compiler {
             .build();
 
         let mut cmd = Command::new(&detected.1);
+
+        // Get C99 compiler flags from the toolchain to make sure correct C standard based on
+        // toolchain and include paths are used
+        let compiler_flags = detected.0.get_compiler_flags();
+        cmd.args(&compiler_flags);
         cmd.arg(out_c);
 
         let exe_name_with_ext = if detected.0.is_msvc() {
