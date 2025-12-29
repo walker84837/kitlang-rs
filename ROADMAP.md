@@ -21,12 +21,12 @@ Goal: lower a well-defined subset of Kit ("Kit Core") to portable C99.
 
 #### Supported language features (Kit Core)
 
-- [ ] Top-level functions
-- [ ] Local variables (`var`)
-- [ ] Primitive types:
-  - [ ] `Int`
-  - [ ] `Bool`
-  - [ ] `CString`
+- [X] Top-level functions
+- [X] Local variables (`var`)
+- [X] Primitive types:
+  - [X] `Int`
+  - [X] `Bool`
+  - [X] `CString`
 - [X] `if` expressions / statements
 - [ ] `while` and `for` loops
 - [X] Function calls
