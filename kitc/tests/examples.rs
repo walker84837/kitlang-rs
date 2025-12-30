@@ -119,3 +119,13 @@ fn test_precedence() -> Result<(), Box<dyn std::error::Error>> {
 fn test_basic_features() -> Result<(), Box<dyn std::error::Error>> {
     run_example_test("basic_features", None)
 }
+
+#[test]
+fn test_while_loop() -> Result<(), Box<dyn std::error::Error>> {
+    run_example_test("while_loop", None)
+}
+
+#[test]
+fn test_for_loop() -> Result<(), Box<dyn std::error::Error>> {
+    run_example_test("for_loop", None)
+}

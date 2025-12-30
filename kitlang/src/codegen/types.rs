@@ -154,6 +154,26 @@ pub enum Stmt {
         /// The block to execute if the condition is false.
         else_branch: Option<Block>,
     },
+    /// While loop statement.
+    While {
+        /// The condition to evaluate.
+        cond: Expr,
+        /// The block to execute as long as the condition is true.
+        body: Block,
+    },
+    /// For loop statement.
+    For {
+        /// The name of the loop variable.
+        var: String,
+        /// The expression to iterate over.
+        iter: Expr,
+        /// The block to execute for each iteration.
+        body: Block,
+    },
+    /// Break statement.
+    Break,
+    /// Continue statement.
+    Continue,
 }
 
 /// Unary operators supported in Kit expressions.

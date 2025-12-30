@@ -19,6 +19,7 @@ type CompileResult<T> = Result<T, CompilationError>;
 pub struct Compiler {
     files: Vec<PathBuf>,
     output: PathBuf,
+    c_output: PathBuf,
     includes: Vec<Include>,
     libs: Vec<String>,
 }
@@ -55,6 +56,7 @@ impl Compiler {
         Self {
             files,
             output: output.as_ref().to_path_buf(),
+            c_output: output.as_ref().with_extension("c"),
             includes: Vec::new(),
             libs,
         }
@@ -170,6 +172,10 @@ impl Compiler {
                     Rule::expr_stmt => self.parse_expr_stmt(inner),
                     Rule::return_stmt => self.parse_return(inner),
                     Rule::if_stmt => self.parse_if_stmt(inner),
+                    Rule::while_stmt => self.parse_while_stmt(inner),
+                    Rule::for_stmt => self.parse_for_stmt(inner),
+                    Rule::break_stmt => Ok(Stmt::Break),
+                    Rule::continue_stmt => Ok(Stmt::Continue),
                     other => Err(CompilationError::ParseError(format!(
                         "unexpected statement: {:?}",
                         other
@@ -232,7 +238,7 @@ impl Compiler {
 
     fn transpile_with_program(&mut self, prog: Program) {
         let c_code = self.generate_c_code(prog);
-        if let Err(e) = std::fs::write(&self.output, c_code) {
+        if let Err(e) = std::fs::write(&self.c_output, c_code) {
             panic!("Failed to write output: {}", e);
         }
     }
@@ -280,6 +286,23 @@ impl Compiler {
             then_branch,
             else_branch,
         })
+    }
+
+    fn parse_while_stmt(&self, pair: Pair<Rule>) -> CompileResult<Stmt> {
+        // while_stmt = { "while" ~ expr ~ block }
+        let mut inner = pair.into_inner();
+        let cond = self.parse_expr(inner.next().unwrap())?;
+        let body = self.parse_block(inner.next().unwrap())?;
+        Ok(Stmt::While { cond, body })
+    }
+
+    fn parse_for_stmt(&self, pair: Pair<Rule>) -> CompileResult<Stmt> {
+        // for_stmt = { "for" ~ identifier ~ "in" ~ expr ~ block }
+        let mut inner = pair.into_inner();
+        let var = inner.next().unwrap().as_str().to_string();
+        let iter = self.parse_expr(inner.next().unwrap())?;
+        let body = self.parse_block(inner.next().unwrap())?;
+        Ok(Stmt::For { var, iter, body })
     }
 
     fn parse_expr(&self, pair: Pair<Rule>) -> CompileResult<Expr> {
@@ -521,9 +544,13 @@ impl Compiler {
         for stmt in &block.stmts {
             match stmt {
                 Stmt::VarDecl { name, ty, init } => {
-                    let ty_str = ty
-                        .as_ref()
-                        .map_or("auto".to_string(), |t| self.transpile_type(t));
+                    let ty_str = if let Some(t) = ty {
+                        self.transpile_type(t)
+                    } else if let Some(Expr::Literal(Literal::Int(_))) = init {
+                        "int".to_string()
+                    } else {
+                        "auto".to_string()
+                    };
                     match init {
                         Some(expr) => {
                             let init_str = self.transpile_expr(expr);
@@ -558,6 +585,29 @@ impl Compiler {
                         if_str.push_str(&format!(" else {{\n{}}}", else_code));
                     }
                     code.push_str(&if_str);
+                }
+                Stmt::While { cond, body } => {
+                    let cond_str = self.transpile_expr(cond);
+                    let body_code = self.transpile_block(body);
+                    code.push_str(&format!("while ({}) {{\n{}}}", cond_str, body_code));
+                }
+                // Translate `for i in 10` to `for (int i = 0; i < 10; ++i)`
+                // Of course, this assumes `iter` (i) is an integer literal or expression that evaluates to an integer.
+                Stmt::For { var, iter, body } => {
+                    // TODO: Right now, this is a basic implementation and might need to be expanded for more "complex" iterators, like
+                    // `for i in 1...10`, etc.
+                    let iter_str = self.transpile_expr(iter);
+                    let body_code = self.transpile_block(body);
+                    code.push_str(&format!(
+                        "for (int {} = 0; {} < {}; ++{}) {{\n{}}}",
+                        var, var, iter_str, var, body_code
+                    ));
+                }
+                Stmt::Break => {
+                    code.push_str("break;\n");
+                }
+                Stmt::Continue => {
+                    code.push_str("continue;\n");
                 }
             }
         }
@@ -638,28 +688,11 @@ impl Compiler {
         let prog = self.parse()?;
         self.transpile_with_program(prog);
 
-        let out_c = if self.output.extension().unwrap_or_default() == "c" {
-            self.output.clone()
-        } else {
-            // ensure .c extension
-            self.output.with_extension("c")
-        };
-
-        // FIX: Handle path errors properly
-        let exe_stem = self
-            .output
-            .file_stem()
-            .ok_or(CompilationError::InvalidOutputPath)?;
-
-        let exe_name = exe_stem
-            .to_str()
-            .ok_or(CompilationError::InvalidOutputPath)?
-            .to_string();
-
         let detected = Toolchain::executable_path().ok_or(CompilationError::ToolchainNotFound)?;
 
         // FIX: Handle non-UTF-8 paths
-        let target_path = out_c
+        let target_path = self
+            .output
             .clone()
             .into_os_string()
             .into_string()
@@ -668,7 +701,7 @@ impl Compiler {
         let opts = CompilerOptions::new(CompilerMeta(detected.0))
             .link_libs(&self.libs)
             .lib_paths(&["/usr/local/lib"])
-            .sources(&[&out_c])
+            .sources(&[&self.c_output])
             .output(&target_path)
             .build();
 
@@ -678,21 +711,15 @@ impl Compiler {
         // toolchain and include paths are used
         let compiler_flags = detected.0.get_compiler_flags();
         cmd.args(&compiler_flags);
-        cmd.arg(out_c);
-
-        let exe_name_with_ext = if detected.0.is_msvc() {
-            format!("{}.exe", exe_name)
-        } else {
-            exe_name
-        };
+        cmd.arg(&self.c_output);
 
         match detected.0 {
             Toolchain::Gcc | Toolchain::Clang => {
-                cmd.arg("-o").arg(&exe_name_with_ext);
+                cmd.arg("-o").arg(&self.output);
             }
             #[cfg(windows)]
             Toolchain::Msvc => {
-                cmd.arg(format!("/Fe:{}", exe_name_with_ext));
+                cmd.arg(format!("/Fe:{}", self.output.display()));
             }
             Toolchain::Other => {
                 return Err(CompilationError::UnsupportedToolchain(
@@ -707,7 +734,18 @@ impl Compiler {
         let status = output.status;
 
         if !status.success() {
+            // Keep the C source file for debugging.
             return Err(CompilationError::CCompileError(output.stderr));
+        }
+
+        // If we don't want to keep C source files, delete after compilation
+        if std::env::var("KEEP_C").is_err()
+            && let Err(err) = std::fs::remove_file(&self.c_output)
+        {
+            log::warn!(
+                "Failed to remove intermediate C file {}: {err}",
+                self.c_output.display()
+            );
         }
 
         Ok(())
