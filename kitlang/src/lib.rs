@@ -7,6 +7,8 @@ pub mod lexer;
 
 pub use logos;
 
+pub use codegen::Toolchain;
+
 /// The Kit language grammar, generated from a pest grammar file.
 #[derive(pest_derive::Parser)]
 #[grammar = "grammar/kit.pest"]

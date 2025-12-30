@@ -1,7 +1,7 @@
 use crate::{
     KitParser, Rule,
     codegen::{
-        compiler::{self, CompilerMeta, CompilerOptions, Toolchain},
+        compiler::{CompilerMeta, CompilerOptions, Toolchain},
         types::*,
     },
     error::CompilationError,
@@ -656,8 +656,7 @@ impl Compiler {
             .ok_or(CompilationError::InvalidOutputPath)?
             .to_string();
 
-        let detected =
-            compiler::get_system_compiler().ok_or(CompilationError::ToolchainNotFound)?;
+        let detected = Toolchain::executable_path().ok_or(CompilationError::ToolchainNotFound)?;
 
         // FIX: Handle non-UTF-8 paths
         let target_path = out_c
@@ -669,7 +668,8 @@ impl Compiler {
         let opts = CompilerOptions::new(CompilerMeta(detected.0))
             .link_libs(&self.libs)
             .lib_paths(&["/usr/local/lib"])
-            .targets(&[target_path])
+            .sources(&[&out_c])
+            .output(&target_path)
             .build();
 
         let mut cmd = Command::new(&detected.1);

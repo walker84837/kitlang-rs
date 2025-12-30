@@ -63,58 +63,14 @@ fn compile(source: &PathBuf, libs: &[String], measure: bool) -> Result<PathBuf, 
     let init = time::Instant::now();
     fs::read_to_string(source).map_err(|_| format!("couldn't read {:?}", source))?;
 
-    let c_file = source.with_extension("c");
+    let ext = if cfg!(windows) { "exe" } else { "" };
+    let exe_path = source.with_extension(ext);
 
-    let extension = if cfg!(windows) { "exe" } else { "" };
-    let exe_path = source.with_extension(extension);
-
-    let mut compiler = Compiler::new(vec![source.clone()], &c_file, libs.to_vec());
+    let mut compiler = Compiler::new(vec![source.clone()], &exe_path, libs.to_vec());
 
     compiler
         .compile()
         .map_err(|e| format!("failed to compile: {e}"))?;
-
-    // TODO: moves this to `kitlang`'s `Toolchain` and use its API for this. Using it avoids having
-    // to handle the flags manually as done here.
-    let compiler_cmd = if cfg!(target_os = "windows") {
-        if let Err(e) = which::which("cl") {
-            eprintln!("couldn't find MSVC compiler: {e}");
-            "gcc"
-        } else {
-            "cl"
-        }
-    } else {
-        "gcc"
-    };
-
-    let mut cmd = Command::new(compiler_cmd);
-
-    let out_flag = if cfg!(target_os = "windows") {
-        if let Err(e) = which::which("cl") {
-            eprintln!("couldn't find MSVC compiler: {e}");
-            "-o"
-        } else {
-            "/Fo"
-        }
-    } else {
-        "-o"
-    };
-
-    cmd.arg(&c_file).arg(out_flag).arg(&exe_path);
-
-    let native_flags = translate_compiler_flags(libs);
-    cmd.args(&native_flags);
-
-    let status = cmd
-        .status()
-        .map_err(|e| format!("failed to launch {}: {}", compiler_cmd, e))?;
-
-    if !status.success() {
-        return Err(format!(
-            "C compilation failed with {}. Command: {:?}",
-            compiler_cmd, cmd
-        ));
-    }
 
     if measure {
         println!("→ Compiled in {}ms", init.elapsed().as_millis());
@@ -134,21 +90,4 @@ fn run_executable(exe_path: &PathBuf) -> Result<(), String> {
         std::process::exit(status.code().unwrap_or(1));
     }
     Ok(())
-}
-
-// TODO: same thing here: this should be replaced with `kitlang`'s `Toolchain` API to properly
-// translate flags.
-fn translate_compiler_flags(libs: &[String]) -> Vec<String> {
-    let mut native_flags = Vec::new();
-    for lib_name in libs {
-        #[cfg(target_os = "windows")]
-        {
-            native_flags.push(format!("{}.lib", lib_name));
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            native_flags.push(format!("-l{}", lib_name));
-        }
-    }
-    native_flags
 }
