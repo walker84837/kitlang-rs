@@ -4,8 +4,11 @@
 //! It orchestrates the compilation process, translating the AST into an
 //! intermediate representation and then into target-specific machine code.
 
-mod compiler;
+pub mod ast;
+pub mod compiler;
+pub mod parser;
 pub use compiler::Toolchain;
+pub use ast::{Include, Program, Function, Param, Block, Stmt, Expr, Literal};
 
 /// Handles the initial parsing of Kitlang source files, constructs the
 /// Abstract Syntax Tree (AST), and orchestrates the generation of C code

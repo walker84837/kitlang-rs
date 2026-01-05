@@ -92,7 +92,6 @@ type_param = { identifier ~ ("=" ~ type_annotation)? }
 trait_def = { metadata_and_modifiers ~ "trait" ~ identifier ~ type_params? ~ "(" ~ (type_param ~ ("," ~ type_param)*)? ~ ")" ~ "{" ~ (function_decl | var_decl)* ~ "}" }
 trait_impl = { metadata_and_modifiers ~ "implement" ~ type_annotation ~ type_params? ~ "for" ~ type_annotation ~ "{" ~ (function_decl | var_decl)* ~ "}" }
 
-
 expr = { assign }
 assign = { logical_or ~ ASSIGN_OP ~ assign | logical_or }
 ASSIGN_OP = { "=" | "+=" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" | "^=" | "<<=" | ">>=" }
@@ -151,7 +150,6 @@ union_init = { "union" ~ type_annotation ~ "{" ~ field_init ~ "}" }
 field_init = { identifier ~ ":" ~ expr }
 tuple_literal = { "(" ~ expr ~ ("," ~ expr)+ ~ ")" }
 range_expr = { identifier ~ "..." ~ identifier | expr ~ "..." ~ expr }
-
 
 literal = { number | boolean | char_literal }
 number = { float | integer }
