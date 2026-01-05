@@ -48,6 +48,14 @@ fn main() -> Result<(), Error> {
             run,
             measure,
         } => {
+            if !source.exists() {
+                eprintln!(
+                    "{} does not exist. Please check again the path and try again.",
+                    source.display()
+                );
+                return Ok(());
+            }
+
             let exe_path = compile(&source, &libs, measure)?;
             if run {
                 run_executable(&exe_path)?;

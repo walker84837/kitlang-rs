@@ -176,7 +176,6 @@ fn test_mixed_comments() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test]
-#[test]
 fn test_nested_comments() -> Result<(), Box<dyn std::error::Error>> {
     let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
