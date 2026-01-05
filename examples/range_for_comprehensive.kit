@@ -1,0 +1,31 @@
+include "stdio.h";
+
+function main() {
+    printf("Testing range for loops:\n");
+
+    printf("Count 1 to 5: ");
+    for i in 1...5 {
+        printf("%d ", i);
+    }
+    printf("\n");
+
+    var start = 10;
+    var end = 15;
+    printf("Count 10 to 15: ");
+    for i in start...end {
+        printf("%d ", i);
+    }
+    printf("\n");
+
+    printf("Count 5 to 1: ");
+    for i in 5...1 {
+        printf("%d ", i);
+    }
+    printf("\n");
+
+    printf("Single element 7: ");
+    for i in 7...7 {
+        printf("%d ", i);
+    }
+    printf("\n");
+}

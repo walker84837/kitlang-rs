@@ -129,3 +129,33 @@ fn test_while_loop() -> Result<(), Box<dyn std::error::Error>> {
 fn test_for_loop() -> Result<(), Box<dyn std::error::Error>> {
     run_example_test("for_loop", None)
 }
+
+#[test]
+fn test_range_basic() -> Result<(), Box<dyn std::error::Error>> {
+    run_example_test("range_for_simple", None)
+}
+
+#[test]
+fn test_range_variables() -> Result<(), Box<dyn std::error::Error>> {
+    run_example_test("range_with_variables", None)
+}
+
+#[test]
+fn test_range_comprehensive() -> Result<(), Box<dyn std::error::Error>> {
+    run_example_test("range_for_comprehensive", None)
+}
+
+#[test]
+fn test_range_edge_cases() -> Result<(), Box<dyn std::error::Error>> {
+    run_example_test("range_edge_cases", None)
+}
+
+#[test]
+fn test_range_negative() -> Result<(), Box<dyn std::error::Error>> {
+    run_example_test("test_negative_range", None)
+}
+
+#[test]
+fn test_simple_range() -> Result<(), Box<dyn std::error::Error>> {
+    run_example_test("simple_range", None)
+}

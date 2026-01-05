@@ -475,6 +475,13 @@ pub enum Expr {
         /// The expression to evaluate if the condition is false.
         else_branch: Box<Expr>,
     },
+    /// Range literal expression (e.g., `1...10`).
+    RangeLiteral {
+        /// The start of the range.
+        start: Box<Expr>,
+        /// The end of the range (inclusive).
+        end: Box<Expr>,
+    },
 }
 
 /// Represents literal values in Kit.

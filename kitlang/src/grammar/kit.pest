@@ -50,7 +50,7 @@ return_stmt = { "return" ~ expr? ~ ";" }
 if_stmt = { "if" ~ expr ~ block ~ else_part? }
 else_part = { "else" ~ (block | if_stmt) }
 
-for_stmt = { "for" ~ identifier ~ "in" ~ expr ~ block }
+for_stmt = { "for" ~ identifier ~ "in" ~ (range_expr | expr) ~ block }
 
 while_stmt = { "while" ~ expr ~ block }
 
@@ -150,6 +150,7 @@ struct_init = { "struct" ~ type_annotation ~ "{" ~ (field_init ~ ("," ~ field_in
 union_init = { "union" ~ type_annotation ~ "{" ~ field_init ~ "}" }
 field_init = { identifier ~ ":" ~ expr }
 tuple_literal = { "(" ~ expr ~ ("," ~ expr)+ ~ ")" }
+range_expr = { identifier ~ "..." ~ identifier | expr ~ "..." ~ expr }
 
 
 literal = { number | boolean | char_literal }

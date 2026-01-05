@@ -1,0 +1,6 @@
+Testing range for loops:
+Count 1 to 5: 1 2 3 4 5 
+Count 10 to 15: 10 11 12 13 14 15 
+Count 5 to 1: 
+Single element 7: 7 
+Expression range 2*2...3*3: 4 5 6 7 8 9 

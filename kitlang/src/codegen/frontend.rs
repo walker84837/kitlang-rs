@@ -433,10 +433,20 @@ impl Compiler {
                     else_branch: Box::new(else_branch),
                 })
             }
+
             Rule::primary => {
                 // SAFETY: Primary rule always has exactly one child
                 let inner = pair.into_inner().next().unwrap();
                 self.parse_expr(inner)
+            }
+            Rule::range_expr => {
+                let mut inner = pair.into_inner();
+                let start = self.parse_expr(inner.next().unwrap())?;
+                let end = self.parse_expr(inner.next().unwrap())?;
+                Ok(Expr::RangeLiteral {
+                    start: Box::new(start),
+                    end: Box::new(end),
+                })
             }
             other => Err(CompilationError::ParseError(format!(
                 "Unexpected expr rule: {:?}",
@@ -594,14 +604,26 @@ impl Compiler {
                 // Translate `for i in 10` to `for (int i = 0; i < 10; ++i)`
                 // Of course, this assumes `iter` (i) is an integer literal or expression that evaluates to an integer.
                 Stmt::For { var, iter, body } => {
-                    // TODO: Right now, this is a basic implementation and might need to be expanded for more "complex" iterators, like
-                    // `for i in 1...10`, etc.
-                    let iter_str = self.transpile_expr(iter);
                     let body_code = self.transpile_block(body);
-                    code.push_str(&format!(
-                        "for (int {} = 0; {} < {}; ++{}) {{\n{}}}",
-                        var, var, iter_str, var, body_code
-                    ));
+                    match iter {
+                        Expr::RangeLiteral { start, end } => {
+                            // Handle range literals: `for i in 1...10`
+                            let start_str = self.transpile_expr(start);
+                            let end_str = self.transpile_expr(end);
+                            code.push_str(&format!(
+                                "for (int {} = {}; {} < {}; ++{}) {{\n{}}}",
+                                var, start_str, var, end_str, var, body_code
+                            ));
+                        }
+                        _ => {
+                            // Handle single integer expressions: `for i in 3`
+                            let iter_str = self.transpile_expr(iter);
+                            code.push_str(&format!(
+                                "for (int {} = 0; {} < {}; ++{}) {{\n{}}}",
+                                var, var, iter_str, var, body_code
+                            ));
+                        }
+                    }
                 }
                 Stmt::Break => {
                     code.push_str("break;\n");
@@ -649,6 +671,11 @@ impl Compiler {
                 let left_str = self.transpile_expr(left);
                 let right_str = self.transpile_expr(right);
                 format!("({} {} {})", left_str, op.to_c_str(), right_str)
+            }
+            Expr::RangeLiteral { start: _, end: _ } => {
+                // Range literals are not directly transpiled to C
+                // They are only used in for loop context
+                panic!("Range literals should only be used in for loop expressions")
             }
         }
     }

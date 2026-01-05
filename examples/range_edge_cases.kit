@@ -1,0 +1,23 @@
+include "stdio.h";
+
+function main() {
+    printf("Testing range edge cases:\n");
+
+    printf("Empty range 5...1: ");
+    for i in 5...1 {
+        printf("%d ", i);
+    }
+    printf("\n");
+
+    printf("Single element 3...3: ");
+    for i in 3...3 {
+        printf("%d ", i);
+    }
+    printf("\n");
+
+    printf("Zero range 0...0: ");
+    for i in 0...0 {
+        printf("%d ", i);
+    }
+    printf("\n");
+}

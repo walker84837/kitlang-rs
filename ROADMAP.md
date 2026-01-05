@@ -30,7 +30,7 @@ Goal: lower a well-defined subset of Kit ("Kit Core") to portable C99.
 - [X] `if` expressions / statements
 - [ ] `while` and `for` loops
   - [X] Basic implementation
-  - [ ] `for i in X...Y`
+  - [x] `for i in X...Y`
   - [ ] [`kit.iterator`](https://kitlang.dev/examples/#kititerator)
 - [X] Function calls
 - [X] `return`
