@@ -7,8 +7,8 @@
 pub mod ast;
 pub mod compiler;
 pub mod parser;
+pub use ast::{Block, Expr, Function, Include, Literal, Param, Program, Stmt};
 pub use compiler::Toolchain;
-pub use ast::{Include, Program, Function, Param, Block, Stmt, Expr, Literal};
 
 /// Handles the initial parsing of Kitlang source files, constructs the
 /// Abstract Syntax Tree (AST), and orchestrates the generation of C code

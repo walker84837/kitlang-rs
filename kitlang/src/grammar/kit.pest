@@ -1,5 +1,8 @@
-WHITESPACE = _{ " " | "\t" | NEWLINE }
+WHITESPACE = _{ " " | "\t" | NEWLINE | COMMENT_BLOCK | COMMENT_LINE }
 NEWLINE = _{ "\n" | "\r\n" }
+
+COMMENT_BLOCK = _{ "/*" ~ (!"*/" ~ ANY)* ~ "*/" }
+COMMENT_LINE = _{ "//" ~ (!NEWLINE ~ ANY)* ~ NEWLINE }
 
 program = _{ SOI ~ (import_stmt | include_stmt | function_decl | type_def | trait_def | trait_impl | rule_set | using_stmt)* ~ EOI }
 

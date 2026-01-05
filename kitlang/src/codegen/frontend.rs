@@ -5,10 +5,10 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::codegen::ast::{Include, Program, Function, Block, Stmt, Expr, Literal};
+use crate::codegen::ast::*;
 use crate::codegen::compiler::{CompilerMeta, CompilerOptions, Toolchain};
-use crate::codegen::types::{Type, ToCRepr};
 use crate::codegen::parser::Parser as CodeParser;
+use crate::codegen::types::{ToCRepr, Type};
 
 pub type CompileResult<T> = Result<T, CompilationError>;
 
@@ -29,7 +29,7 @@ impl Compiler {
             c_output: output.as_ref().with_extension("c"),
             includes: Vec::new(),
             libs,
-            parser: CodeParser,
+            parser: CodeParser::new(),
         }
     }
 

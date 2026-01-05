@@ -159,3 +159,47 @@ fn test_range_negative() -> Result<(), Box<dyn std::error::Error>> {
 fn test_simple_range() -> Result<(), Box<dyn std::error::Error>> {
     run_example_test("simple_range", None)
 }
+
+#[test]
+fn test_line_comments() -> Result<(), Box<dyn std::error::Error>> {
+    run_example_test("line_comments", None)
+}
+
+#[test]
+fn test_block_comments() -> Result<(), Box<dyn std::error::Error>> {
+    run_example_test("block_comments", None)
+}
+
+#[test]
+fn test_mixed_comments() -> Result<(), Box<dyn std::error::Error>> {
+    run_example_test("mixed_comments", None)
+}
+
+#[test]
+#[test]
+fn test_nested_comments() -> Result<(), Box<dyn std::error::Error>> {
+    let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .ok_or("couldn't get workspace root")?;
+
+    let examples_dir = workspace_root.join("examples");
+    let example_file = examples_dir.join("nested_comments.kit");
+
+    assert!(
+        example_file.exists(),
+        "example file {} does not exist",
+        example_file.display()
+    );
+
+    // This test should fail to compile due to nested block comments
+    let kitc = cargo_bin!("kitc");
+    let mut cmd = assert_cmd::Command::from_std(std::process::Command::new(kitc));
+    cmd.current_dir(workspace_root);
+    cmd.arg("compile").arg(&example_file);
+
+    let result = cmd.assert();
+    // Should fail to compile
+    assert!(result.try_success().is_err());
+
+    Ok(())
+}

@@ -8,11 +8,38 @@ use super::ast::{Block, Expr, Function, Include, Literal, Param, Stmt};
 use super::frontend::CompileResult;
 use super::types::{AssignmentOperator, Type};
 
+use std::path::PathBuf;
 use std::str::FromStr;
 
-pub struct Parser;
+#[derive(Default, Debug)]
+pub struct Parser {
+    current_file: Option<PathBuf>,
+    source_content: String,
+}
 
 impl Parser {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_file(file: PathBuf) -> Self {
+        let source_content = std::fs::read_to_string(&file).unwrap_or_else(|_| String::new());
+
+        Self {
+            current_file: Some(file),
+            source_content,
+        }
+    }
+
+    /// Gets the line content from a line number. Returns an empty string if the line does not exist
+    fn get_line_content(&self, line_num: usize) -> String {
+        self.source_content
+            .lines()
+            .nth(line_num.saturating_sub(1))
+            .unwrap_or("")
+            .to_string()
+    }
+
     pub fn parse_include(&self, pair: Pair<Rule>) -> Include {
         // include_stmt = { "include" ~ string ~ ("=>" ~ string)? ~ ";" }
         let mut inner = pair.into_inner();

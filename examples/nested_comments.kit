@@ -1,0 +1,8 @@
+include "stdio.h";
+
+// Test that nested block comments fail appropriately (this should not compile)
+function main() {
+    /* This has /* nested */ comment */
+    var x = 1;
+    printf("%d\n", x);
+}
