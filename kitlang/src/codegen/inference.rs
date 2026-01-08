@@ -7,6 +7,7 @@ use crate::error::{CompilationError, CompileResult};
 pub struct TypeInferencer {
     pub store: TypeStore,
     symbols: SymbolTable,
+    current_return_type: Option<TypeId>,
 }
 
 impl Default for TypeInferencer {
@@ -20,6 +21,7 @@ impl TypeInferencer {
         Self {
             store: TypeStore::new(),
             symbols: SymbolTable::new(),
+            current_return_type: None,
         }
     }
 
@@ -50,8 +52,12 @@ impl TypeInferencer {
             Some(self.store.new_unknown())
         };
 
+        self.current_return_type = func.inferred_return;
+
         // Infer function body
         self.infer_block(&mut func.body)?;
+
+        self.current_return_type = None;
 
         // Register function signature in symbol table
         if let Some(ret_ty) = func.inferred_return {
@@ -107,12 +113,27 @@ impl TypeInferencer {
             }
 
             Stmt::Return(Some(expr)) => {
-                self.infer_expr(expr)?;
-                // TODO: Check return type matches function return
+                let expr_ty = self.infer_expr(expr)?;
+                if let Some(ret_ty) = self.current_return_type {
+                    self.unify(ret_ty, expr_ty)?;
+                } else {
+                    return Err(CompilationError::TypeError(
+                        "Return statement outside of function".into(),
+                    ));
+                }
             }
 
-            // Void return - no type to check
-            Stmt::Return(None) => {}
+            // Void return - check if function expects void
+            Stmt::Return(None) => {
+                if let Some(ret_ty) = self.current_return_type {
+                    let void_ty = self.store.new_known(Type::Void);
+                    self.unify(ret_ty, void_ty)?;
+                } else {
+                    return Err(CompilationError::TypeError(
+                        "Return statement outside of function".into(),
+                    ));
+                }
+            }
 
             Stmt::If {
                 cond,
