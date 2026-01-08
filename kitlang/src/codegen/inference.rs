@@ -1,4 +1,4 @@
-use super::ast::*;
+use super::ast::{Block, Expr, Function, Literal, Program, Stmt};
 use super::symbols::SymbolTable;
 use super::types::{BinaryOperator, Type, TypeId, TypeStore, UnaryOperator};
 use crate::error::{CompilationError, CompileResult};
@@ -169,8 +169,7 @@ impl TypeInferencer {
                     .map_err(CompilationError::TypeError)?;
                 if iter_resolved != Type::Int && iter_resolved != Type::Void {
                     return Err(CompilationError::TypeError(format!(
-                        "For loop iterator must be Int or Range, found {:?}",
-                        iter_resolved
+                        "For loop iterator must be Int or Range, found {iter_resolved:?}"
                     )));
                 }
 
@@ -187,12 +186,12 @@ impl TypeInferencer {
         Ok(())
     }
 
-    /// Infer types for an expression.
+    /// Infer types for an expression
     fn infer_expr(&mut self, expr: &mut Expr) -> Result<TypeId, CompilationError> {
         let ty = match expr {
             Expr::Identifier(name, ty_id) => {
                 let var_ty = self.symbols.lookup_var(name).ok_or_else(|| {
-                    CompilationError::TypeError(format!("Use of undeclared variable '{}'", name))
+                    CompilationError::TypeError(format!("Use of undeclared variable '{name}'"))
                 })?;
                 *ty_id = var_ty;
                 var_ty
@@ -268,8 +267,7 @@ impl TypeInferencer {
                             self.store.new_known(*inner_ty)
                         } else {
                             return Err(CompilationError::TypeError(format!(
-                                "Cannot dereference non-pointer type: {:?}",
-                                resolved
+                                "Cannot dereference non-pointer type: {resolved:?}"
                             )));
                         }
                     }

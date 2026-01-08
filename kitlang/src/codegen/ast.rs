@@ -1,4 +1,4 @@
-use crate::codegen::types::*;
+use crate::codegen::types::{AssignmentOperator, BinaryOperator, Type, TypeId, UnaryOperator};
 
 use std::collections::HashSet;
 
@@ -169,15 +169,16 @@ pub enum Literal {
 
 impl Literal {
     /// Converts the literal to its C representation string.
+    #[must_use]
     pub fn to_c(&self) -> String {
         match self {
             Literal::Int(i) => i.to_string(),
             Literal::Float(f) => {
                 // Ensure float literals have 'f' suffix in C
                 if f.fract() == 0.0 {
-                    format!("{}.0f", f)
+                    format!("{f}.0f")
                 } else {
-                    format!("{}f", f)
+                    format!("{f}f")
                 }
             }
             Literal::String(s) => {
@@ -192,7 +193,7 @@ impl Literal {
                         _ => c.to_string(),
                     })
                     .collect();
-                format!("\"{}\"", escaped)
+                format!("\"{escaped}\"")
             }
             Literal::Bool(b) => b.to_string(),
             Literal::Null => "NULL".to_string(),

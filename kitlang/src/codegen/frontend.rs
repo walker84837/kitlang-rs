@@ -1,12 +1,13 @@
-use crate::{KitParser, Rule, error::CompilationError};
 use crate::error::CompileResult;
+use crate::{KitParser, Rule, error::CompilationError};
 use pest::Parser;
 
 use std::collections::HashSet;
+use std::fmt::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::codegen::ast::*;
+use crate::codegen::ast::{Block, Expr, Function, Include, Program, Stmt};
 use crate::codegen::compiler::{CompilerMeta, CompilerOptions, Toolchain};
 use crate::codegen::inference::TypeInferencer;
 use crate::codegen::parser::Parser as CodeParser;
@@ -60,7 +61,7 @@ impl Compiler {
             }
         }
 
-        self.includes = includes.clone();
+        self.includes.clone_from(&includes);
 
         Ok(Program {
             includes,
@@ -70,10 +71,10 @@ impl Compiler {
     }
 
     /// Generate C code from the AST and write it to the output path
-    fn transpile_with_program(&mut self, prog: Program) {
-        let c_code = self.generate_c_code(&prog);
+    fn transpile_with_program(&mut self, prog: &Program) {
+        let c_code = self.generate_c_code(prog);
         if let Err(e) = std::fs::write(&self.c_output, c_code) {
-            panic!("Failed to write output: {}", e);
+            panic!("Failed to write output: {e}");
         }
     }
 
@@ -134,7 +135,7 @@ impl Compiler {
 
         // emit unique headers
         for hdr in seen_headers {
-            out.push_str(&format!("#include {}\n", hdr));
+            writeln!(out, "#include {hdr}").unwrap();
         }
         out.push('\n');
 
@@ -213,16 +214,15 @@ impl Compiler {
                         .inferencer
                         .store
                         .resolve(*inferred)
-                        .map(|t| t.to_c_repr().name)
-                        .unwrap_or_else(|_| "auto".to_string());
+                        .map_or_else(|_| "auto".to_string(), |t| t.to_c_repr().name);
 
                     match init {
                         Some(expr) => {
                             let init_str = self.transpile_expr(expr);
-                            format!("{} {} = {};\n", ty_str, name, init_str)
+                            format!("{ty_str} {name} = {init_str};\n")
                         }
                         None => {
-                            format!("{} {};\n", ty_str, name)
+                            format!("{ty_str} {name};\n")
                         }
                     }
                 }
@@ -260,16 +260,12 @@ impl Compiler {
                     let mut s = if let Expr::RangeLiteral { start, end } = iter {
                         let start_str = self.transpile_expr(start);
                         let end_str = self.transpile_expr(end);
-                        format!(
-                            "for (int {} = {}; {} < {}; ++{}) ",
-                            var, start_str, var, end_str, var
-                        )
+                        format!("for (int {var} = {start_str}; {var} < {end_str}; ++{var}) ")
                     } else {
                         let iter_str = self.transpile_expr(iter);
-                        format!("for (int {} = 0; {} < {}; ++{}) ", var, var, iter_str, var)
+                        format!("for (int {var} = 0; {var} < {iter_str}; ++{var}) ")
                     };
                     s.push_str(&self.transpile_block(body));
-                    s.push('\n');
                     s
                 }
                 Stmt::Break => "break;\n".to_string(),
@@ -300,7 +296,7 @@ impl Compiler {
                     .map(|a| self.transpile_expr(a))
                     .collect::<Vec<_>>()
                     .join(", ");
-                format!("{}({})", callee, args_str)
+                format!("{callee}({args_str})")
             }
             Expr::UnaryOp { op, expr, ty: _ } => {
                 let expr_str = self.transpile_expr(expr);
@@ -314,7 +310,7 @@ impl Compiler {
             } => {
                 let left_str = self.transpile_expr(left);
                 let right_str = self.transpile_expr(right);
-                format!("({} {} {})", left_str, op.to_c_str(), right_str)
+                format!("({left_str} {} {right_str})", op.to_c_str())
             }
             Expr::Assign {
                 op,
@@ -324,7 +320,7 @@ impl Compiler {
             } => {
                 let left_str = self.transpile_expr(left);
                 let right_str = self.transpile_expr(right);
-                format!("{} {} {}", left_str, op.to_c_str(), right_str)
+                format!("{left_str} {} {right_str}", op.to_c_str())
             }
             Expr::If {
                 cond,
@@ -335,7 +331,7 @@ impl Compiler {
                 let cond_str = self.transpile_expr(cond);
                 let then_str = self.transpile_expr(then_branch);
                 let else_str = self.transpile_expr(else_branch);
-                format!("({} ? {} : {})", cond_str, then_str, else_str)
+                format!("({cond_str} ? {then_str} : {else_str})")
             }
             Expr::RangeLiteral { .. } => {
                 // Should technically not be used alone, but return something safe to avoid panic
@@ -348,7 +344,7 @@ impl Compiler {
         let mut prog = self.parse()?;
 
         self.inferencer.infer_program(&mut prog)?;
-        self.transpile_with_program(prog);
+        self.transpile_with_program(&prog);
 
         let detected = Toolchain::executable_path().ok_or(CompilationError::ToolchainNotFound)?;
 

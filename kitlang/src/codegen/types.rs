@@ -6,7 +6,7 @@ use pest::iterators::Pair;
 use std::collections::HashSet;
 use std::str::FromStr;
 
-/// Identity handle for a type in TypeStore.
+/// Identity handle for a type in `TypeStore`.
 ///
 /// Types need stable identity for inference - we can't use the enum alone.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -24,7 +24,7 @@ pub struct TypeVarId(u32);
 
 /// Represents a type variable used during inference.
 ///
-/// Type variables start unbound and may later be bound to a TypeId.
+/// Type variables start unbound and may later be bound to a `TypeId`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TypeVar {
     binding: Option<TypeId>,
@@ -83,26 +83,25 @@ impl TypeStore {
     /// Bind a type variable to a specific type ID.
     pub fn bind_type_var(&mut self, var_id: TypeVarId, ty: TypeId) -> Result<(), String> {
         if let Some(existing) = self.type_vars.get_mut(var_id.0 as usize) {
-            if existing.binding.is_some() {
+            if let Some(binding) = existing.binding {
                 return Err(format!(
-                    "Type variable {:?} already bound to {:?}",
-                    var_id, existing.binding
+                    "Type variable {var_id:?} already bound to {binding:?}"
                 ));
             }
             existing.binding = Some(ty);
             Ok(())
         } else {
-            Err(format!("Type variable {:?} does not exist", var_id))
+            Err(format!("Type variable {var_id:?} does not exist"))
         }
     }
 
-    /// Resolve a TypeId to its concrete Type.
+    /// Resolve a `TypeId` to its concrete Type.
     ///
     /// Follows type variable bindings. Returns error if any type variables remain unbound.
     pub fn resolve(&self, mut id: TypeId) -> Result<Type, String> {
         loop {
             let Some(node) = self.nodes.get(id.0 as usize) else {
-                return Err(format!("Type ID {:?} does not exist", id));
+                return Err(format!("Type ID {id:?} does not exist"));
             };
 
             id = match node {
@@ -120,11 +119,11 @@ impl TypeStore {
         };
 
         var.binding.ok_or_else(|| {
-            format!("Cannot resolve type ID {id:?}: type variable {var_id:?} is unbound",)
+            format!("Cannot resolve type ID {id:?}: type variable {var_id:?} is unbound")
         })
     }
 
-    /// Check if a TypeId is an unknown type variable.
+    /// Check if a `TypeId` is an unknown type variable.
     pub fn is_unknown(&self, id: TypeId) -> bool {
         matches!(self.nodes.get(id.0 as usize), Some(TypeNode::Unknown(_)))
     }
@@ -134,7 +133,7 @@ impl TypeStore {
         &self.nodes[id.0 as usize]
     }
 
-    /// Follow bindings to find the representative TypeId.
+    /// Follow bindings to find the representative `TypeId`.
     pub fn find_rep(&self, mut id: TypeId) -> TypeId {
         loop {
             match self.nodes.get(id.0 as usize) {
@@ -168,13 +167,13 @@ impl TypeStore {
             (_, TypeNode::Unknown(var_id)) => self.bind_type_var(var_id, rep_a),
 
             // Both Known -> structural comparison
-            (TypeNode::Known(ty_a), TypeNode::Known(ty_b)) => self.unify_types(ty_a, ty_b),
+            (TypeNode::Known(ty_a), TypeNode::Known(ty_b)) => self.unify_types(&ty_a, &ty_b),
         }
     }
 
     /// Unify two known Type enum values structurally.
-    fn unify_types(&mut self, a: Type, b: Type) -> Result<(), String> {
-        match (&a, &b) {
+    fn unify_types(&mut self, a: &Type, b: &Type) -> Result<(), String> {
+        match (a, b) {
             // Simple type equality
             (Type::Int8, Type::Int8) => Ok(()),
             (Type::Int16, Type::Int16) => Ok(()),
@@ -186,7 +185,7 @@ impl TypeStore {
             (Type::Uint64, Type::Uint64) => Ok(()),
             (Type::Float32, Type::Float32) => Ok(()),
             (Type::Float64, Type::Float64) => Ok(()),
-            (Type::Int, Type::Int) | (Type::Int, Type::Bool) | (Type::Bool, Type::Int) => Ok(()),
+            (Type::Int | Type::Bool, Type::Int) | (Type::Int, Type::Bool) => Ok(()),
             (Type::Float, Type::Float) => Ok(()),
             (Type::Size, Type::Size) => Ok(()),
             (Type::Char, Type::Char) => Ok(()),
@@ -216,8 +215,7 @@ impl TypeStore {
             (Type::CArray(elem1, len1), Type::CArray(elem2, len2)) => {
                 if len1 != len2 {
                     return Err(format!(
-                        "Cannot unify arrays of different sizes: {:?} vs {:?}",
-                        len1, len2
+                        "Cannot unify arrays of different sizes: {len1:?} vs {len2:?}"
                     ));
                 }
                 self.unify_type_ids((**elem1).clone(), (**elem2).clone())
@@ -228,15 +226,12 @@ impl TypeStore {
                 if n1 == n2 {
                     Ok(())
                 } else {
-                    Err(format!(
-                        "Cannot unify different named types: {} vs {}",
-                        n1, n2
-                    ))
+                    Err(format!("Cannot unify different named types: {n1} vs {n2}"))
                 }
             }
 
             // Everything else is a type mismatch
-            _ => Err(format!("Type mismatch: {:?} vs {:?}", a, b)),
+            _ => Err(format!("Type mismatch: {a:?} vs {b:?}")),
         }
     }
 
@@ -347,10 +342,9 @@ impl ToCRepr for Type {
             Type::Uint16 => simple_c_type("uint16_t", &["stdint.h"]),
             Type::Uint32 => simple_c_type("uint32_t", &["stdint.h"]),
             Type::Uint64 => simple_c_type("uint64_t", &["stdint.h"]),
-            Type::Float32 => simple_c_type("float", &[]),
+            Type::Float32 | Type::Float => simple_c_type("float", &[]),
             Type::Float64 => simple_c_type("double", &[]),
             Type::Int => simple_c_type("int", &[]),
-            Type::Float => simple_c_type("float", &[]),
             Type::Size => simple_c_type("size_t", &["stddef.h"]),
             Type::Char => simple_c_type("char", &[]),
             Type::Bool => simple_c_type("bool", &["stdbool.h"]),
@@ -374,7 +368,7 @@ impl ToCRepr for Type {
 fn simple_c_type(name: &str, headers: &[&str]) -> CRepr {
     let mut h = HashSet::new();
     for header in headers {
-        h.insert(format!("<{}>", header));
+        h.insert(format!("<{header}>"));
     }
     CRepr {
         name: name.to_string(),

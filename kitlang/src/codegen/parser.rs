@@ -285,7 +285,7 @@ impl Parser {
                     Rule::unary_op => {
                         let op_str = first_pair.as_str();
                         let op = UnaryOperator::from_str(op_str)
-                            .map_err(|_| parse_error!("invalid unary operation: {}", op_str))?;
+                            .map_err(|()| parse_error!("invalid unary operation: {op_str}"))?;
 
                         // SAFETY: Grammar guarantees expression after unary op
                         let expr = self.parse_expr(inner_pairs.next().unwrap())?;
@@ -306,7 +306,7 @@ impl Parser {
                         })
                     }
                     Rule::primary => self.parse_expr(first_pair),
-                    _other => Err(parse_error!("Unexpected rule in unary: {:?}", _other)),
+                    other => Err(parse_error!("Unexpected rule in unary: {other:?}")),
                 }
             }
             Rule::identifier => Ok(Expr::Identifier(
@@ -396,12 +396,12 @@ impl Parser {
                     // Otherwise, unwrap and parse the inner rule
                     let inner_pair = inner.next().unwrap();
                     match inner_pair.as_rule() {
-                        Rule::literal => self.parse_expr(inner_pair),
                         Rule::identifier => Ok(Expr::Identifier(
                             inner_pair.as_str().to_string(),
                             TypeId::default(),
                         )),
-                        Rule::function_call_expr
+                        Rule::literal
+                        | Rule::function_call_expr
                         | Rule::array_literal
                         | Rule::struct_init
                         | Rule::union_init
@@ -409,8 +409,8 @@ impl Parser {
                         | Rule::if_expr
                         | Rule::range_expr
                         | Rule::string
-                        | Rule::expr => self.parse_expr(inner_pair),
-                        Rule::unary => self.parse_expr(inner_pair),
+                        | Rule::expr
+                        | Rule::unary => self.parse_expr(inner_pair),
                         _ => Err(parse_error!(
                             "Unexpected primary inner rule: {:?}",
                             inner_pair.as_rule()
@@ -429,8 +429,7 @@ impl Parser {
                 })
             }
             other => Err(CompilationError::ParseError(format!(
-                "Unexpected expr rule: {:?}",
-                other
+                "Unexpected expr rule: {other:?}"
             ))),
         }
     }

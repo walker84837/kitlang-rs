@@ -146,7 +146,7 @@ impl Toolchain {
         match self {
             Toolchain::Gcc | Toolchain::Clang => {
                 let flags = ["-std=c99", "-Wall", "-Wextra", "-pedantic"];
-                flags.iter().map(|s| s.to_string()).collect()
+                flags.iter().map(ToString::to_string).collect()
             }
             #[cfg(windows)]
             Toolchain::Msvc => {
@@ -181,7 +181,7 @@ pub struct CompilerOptions {
     pub link_opts: Vec<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct CompilerMeta(pub Toolchain);
 
 impl CompilerOptions {
@@ -256,9 +256,10 @@ impl CompilerOptions {
 
     /// Build the compiler invocation used to spawn `Command`.
     ///
-    /// Returns (path_to_compiler_executable, args_vec).
+    /// Returns (`path_to_compiler_executable`, `args_vec`).
     ///
-    /// Errors:
+    /// # Errors
+    ///
     /// - if `sources` is empty
     /// - if `output` is not set
     /// - if no system compiler can be found and no `enforced_toolchain` is usable

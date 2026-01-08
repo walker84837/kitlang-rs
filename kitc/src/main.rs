@@ -69,7 +69,7 @@ fn main() -> Result<(), Error> {
 
 fn compile(source: &PathBuf, libs: &[String], measure: bool) -> Result<PathBuf, String> {
     let init = time::Instant::now();
-    fs::read_to_string(source).map_err(|_| format!("couldn't read {:?}", source))?;
+    fs::read_to_string(source).map_err(|_| format!("couldn't read {}", source.display()))?;
 
     let ext = if cfg!(windows) { "exe" } else { "" };
     let exe_path = source.with_extension(ext);
@@ -92,7 +92,7 @@ fn compile(source: &PathBuf, libs: &[String], measure: bool) -> Result<PathBuf, 
 fn run_executable(exe_path: &PathBuf) -> Result<(), String> {
     let status = Command::new(exe_path)
         .status()
-        .map_err(|e| format!("failed to launch executable: {}", e))?;
+        .map_err(|e| format!("failed to launch executable: {e}"))?;
 
     if !status.success() {
         std::process::exit(status.code().unwrap_or(1));

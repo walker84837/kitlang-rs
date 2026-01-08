@@ -4,9 +4,9 @@ use std::collections::HashMap;
 /// Symbol table for tracking variable and function types during inference.
 ///
 /// Currently uses a flat scope (no nesting). Variables and functions are tracked
-/// by their names and their TypeIds.
+/// by their names and their `TypeId`s.
 pub struct SymbolTable {
-    /// Maps variable names to their inferred TypeIds.
+    /// Maps variable names to their inferred `TypeId`s.
     vars: HashMap<String, TypeId>,
 
     /// Maps function names to their signatures (parameter types, return type).

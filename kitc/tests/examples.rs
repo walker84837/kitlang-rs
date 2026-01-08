@@ -23,8 +23,8 @@ fn run_example_test(
         .ok_or("couldn't get workspace root")?;
 
     let examples_dir = workspace_root.join("examples");
-    let example_file = examples_dir.join(format!("{}.kit", example_name));
-    let expected_file = examples_dir.join(format!("{}.kit.expected", example_name));
+    let example_file = examples_dir.join(format!("{example_name}.kit"));
+    let expected_file = examples_dir.join(format!("{example_name}.kit.expected"));
 
     assert!(
         example_file.exists(),
@@ -39,8 +39,7 @@ fn run_example_test(
     );
 
     log::info!(
-        "Running example {} in {} (path: {}). Expected file is at {}",
-        example_name,
+        "Running example {example_name} in {} (path: {}). Expected file is at {}",
         workspace_root.display(),
         example_file.display(),
         expected_file.display()
