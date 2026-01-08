@@ -23,8 +23,8 @@ fn run_example_test(
         .ok_or("couldn't get workspace root")?;
 
     let examples_dir = workspace_root.join("examples");
-    let example_file = examples_dir.join(format!("{}.kit", example_name));
-    let expected_file = examples_dir.join(format!("{}.kit.expected", example_name));
+    let example_file = examples_dir.join(format!("{example_name}.kit"));
+    let expected_file = examples_dir.join(format!("{example_name}.kit.expected"));
 
     assert!(
         example_file.exists(),
@@ -39,8 +39,7 @@ fn run_example_test(
     );
 
     log::info!(
-        "Running example {} in {} (path: {}). Expected file is at {}",
-        example_name,
+        "Running example {example_name} in {} (path: {}). Expected file is at {}",
         workspace_root.display(),
         example_file.display(),
         expected_file.display()
@@ -77,9 +76,7 @@ fn run_example_test(
         .success();
 
     // TODO: executable files are actually generated in the CWD, not in the examples folder.
-    // This explains why the executable is not actually removed. But I don't get why these tests
-    // passed on Linux and Mac if std::fs::remove_file is supposed to also fail when the file
-    // doesn't exist.
+    // This explains why the executable is not actually generated in the examples folder.
     if let Err(err) = std::fs::remove_file(&executable_path) {
         log::error!("Failed to remove executable: {err}");
     }
@@ -173,6 +170,11 @@ fn test_block_comments() -> Result<(), Box<dyn std::error::Error>> {
 #[test]
 fn test_mixed_comments() -> Result<(), Box<dyn std::error::Error>> {
     run_example_test("mixed_comments", None)
+}
+
+#[test]
+fn test_inference() -> Result<(), Box<dyn std::error::Error>> {
+    run_example_test("inference_test", None)
 }
 
 #[test]

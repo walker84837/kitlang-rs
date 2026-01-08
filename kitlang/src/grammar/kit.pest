@@ -163,4 +163,8 @@ char_literal = @{ "'" ~ ( "\\'" | !"'" ~ ANY ) ~ "'" }
 
 string = @{ "\"" ~ ( "\\" ~ ANY | !"\"" ~ ANY )* ~ "\"" }
 
-identifier = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")* }
+identifier = @{
+    !("true" | "false" | "null" | "this" | "Self")
+    ~ (ASCII_ALPHA | "_")
+    ~ (ASCII_ALPHANUMERIC | "_")*
+}
