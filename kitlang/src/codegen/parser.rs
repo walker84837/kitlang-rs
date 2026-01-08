@@ -5,8 +5,8 @@ use crate::error::CompilationError;
 use crate::{Rule, parse_error};
 
 use super::ast::{Block, Expr, Function, Include, Literal, Param, Stmt};
-use crate::error::CompileResult;
 use super::types::{AssignmentOperator, Type, TypeId};
+use crate::error::CompileResult;
 
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -118,8 +118,7 @@ impl Parser {
                     Rule::break_stmt => Ok(Stmt::Break),
                     Rule::continue_stmt => Ok(Stmt::Continue),
                     other => Err(CompilationError::ParseError(format!(
-                        "unexpected statement: {:?}",
-                        other
+                        "unexpected statement: {other:?}",
                     ))),
                 }
             })
@@ -385,26 +384,41 @@ impl Parser {
             }
 
             Rule::primary => {
-                let inner = pair.into_inner().next().unwrap();
-                match inner.as_rule() {
-                    Rule::boolean => match inner.as_str() {
-                        "true" => Ok(Expr::Literal(Literal::Bool(true), TypeId::default())),
-                        "false" => Ok(Expr::Literal(Literal::Bool(false), TypeId::default())),
-                        _ => unreachable!(),
-                    },
-                    Rule::literal => self.parse_expr(inner),
-                    Rule::identifier => match inner.as_str() {
-                        "true" => Ok(Expr::Literal(Literal::Bool(true), TypeId::default())),
-                        "false" => Ok(Expr::Literal(Literal::Bool(false), TypeId::default())),
+                let mut inner = pair.into_inner();
+
+                // Tokens like "null", "this", "Self" have no inner pairs
+                if inner.peek().is_none() {
+                    match pair.as_str() {
                         "null" => Ok(Expr::Literal(Literal::Null, TypeId::default())),
-                        _ => Ok(Expr::Identifier(
-                            inner.as_str().to_string(),
+                        // "this" => Ok(Expr::This(TypeId::default())),
+                        // "Self" => Ok(Expr::SelfType),
+                        other => Err(parse_error!("Unknown primary keyword: {}", other)),
+                    }
+                } else {
+                    // Otherwise, unwrap and parse the inner rule
+                    let inner_pair = inner.next().unwrap();
+                    match inner_pair.as_rule() {
+                        Rule::literal => self.parse_expr(inner_pair),
+                        Rule::identifier => Ok(Expr::Identifier(
+                            inner_pair.as_str().to_string(),
                             TypeId::default(),
                         )),
-                    },
-                    _ => self.parse_expr(inner),
+                        Rule::function_call_expr
+                        | Rule::array_literal
+                        | Rule::struct_init
+                        | Rule::union_init
+                        | Rule::tuple_literal
+                        | Rule::if_expr
+                        | Rule::range_expr => self.parse_expr(inner_pair),
+                        Rule::unary => self.parse_expr(inner_pair),
+                        _ => Err(parse_error!(
+                            "Unexpected primary inner rule: {:?}",
+                            inner_pair.as_rule()
+                        )),
+                    }
                 }
             }
+
             Rule::range_expr => {
                 let mut inner = pair.into_inner();
                 let start = self.parse_expr(inner.next().unwrap())?;

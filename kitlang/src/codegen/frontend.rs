@@ -191,7 +191,7 @@ impl Compiler {
             if !has_return {
                 // Insert return 0 before the closing brace
                 if let Some(pos) = body_code.rfind('}') {
-                    body_code.insert_str(pos, "    return 0;\n");
+                    body_code.insert_str(pos, "return 0;\n");
                 }
             }
         }
