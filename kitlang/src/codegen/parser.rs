@@ -384,11 +384,12 @@ impl Parser {
             }
 
             Rule::primary => {
+                let text = pair.as_str();
                 let mut inner = pair.into_inner();
 
                 // Tokens like "null", "this", "Self" have no inner pairs
                 if inner.peek().is_none() {
-                    match pair.as_str() {
+                    match text {
                         "null" => Ok(Expr::Literal(Literal::Null, TypeId::default())),
                         // "this" => Ok(Expr::This(TypeId::default())),
                         // "Self" => Ok(Expr::SelfType),
@@ -409,7 +410,9 @@ impl Parser {
                         | Rule::union_init
                         | Rule::tuple_literal
                         | Rule::if_expr
-                        | Rule::range_expr => self.parse_expr(inner_pair),
+                        | Rule::range_expr
+                        | Rule::string
+                        | Rule::expr => self.parse_expr(inner_pair),
                         Rule::unary => self.parse_expr(inner_pair),
                         _ => Err(parse_error!(
                             "Unexpected primary inner rule: {:?}",
