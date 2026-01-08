@@ -1,4 +1,5 @@
 use crate::{KitParser, Rule, error::CompilationError};
+use crate::error::CompileResult;
 use pest::Parser;
 
 use std::collections::HashSet;

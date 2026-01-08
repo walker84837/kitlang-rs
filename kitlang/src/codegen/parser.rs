@@ -5,7 +5,7 @@ use crate::error::CompilationError;
 use crate::{Rule, parse_error};
 
 use super::ast::{Block, Expr, Function, Include, Literal, Param, Stmt};
-use super::frontend::CompileResult;
+use crate::error::CompileResult;
 use super::types::{AssignmentOperator, Type, TypeId};
 
 use std::path::PathBuf;
