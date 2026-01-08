@@ -338,11 +338,7 @@ impl Parser {
                             _ => Err(parse_error!("Unexpected number type")),
                         }
                     }
-                    Rule::boolean => match inner.as_str() {
-                        "true" => Ok(Expr::Literal(Literal::Bool(true), TypeId::default())),
-                        "false" => Ok(Expr::Literal(Literal::Bool(false), TypeId::default())),
-                        _s => Err(parse_error!("invalid boolean literal: {}", _s)),
-                    },
+                    Rule::boolean => Self::parse_bool_literal(inner.as_str()),
                     Rule::char_literal => todo!("char literal parsing not implemented"),
                     _ => Err(parse_error!(
                         "Unexpected literal type: {:?}",
@@ -387,10 +383,11 @@ impl Parser {
                 let text = pair.as_str();
                 let mut inner = pair.into_inner();
 
-                // Tokens like "null", "this", "Self" have no inner pairs
+                // Tokens like "null", "this", "Self", "true", "false" have no inner pairs
                 if inner.peek().is_none() {
                     match text {
                         "null" => Ok(Expr::Literal(Literal::Null, TypeId::default())),
+                        "true" | "false" => Self::parse_bool_literal(text),
                         // "this" => Ok(Expr::This(TypeId::default())),
                         // "Self" => Ok(Expr::SelfType),
                         other => Err(parse_error!("Unknown primary keyword: {}", other)),
@@ -463,6 +460,14 @@ impl Parser {
         } else {
             // No assignment operator, so it's just the expression itself (the logical_or that formed the LHS)
             Ok(left)
+        }
+    }
+
+    fn parse_bool_literal(s: &str) -> CompileResult<Expr> {
+        match s {
+            "true" => Ok(Expr::Literal(Literal::Bool(true), TypeId::default())),
+            "false" => Ok(Expr::Literal(Literal::Bool(false), TypeId::default())),
+            _ => Err(parse_error!("invalid boolean literal: {}", s)),
         }
     }
 
