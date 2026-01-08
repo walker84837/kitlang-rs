@@ -7,10 +7,9 @@ use std::process::Command;
 
 use crate::codegen::ast::*;
 use crate::codegen::compiler::{CompilerMeta, CompilerOptions, Toolchain};
+use crate::codegen::inference::TypeInferencer;
 use crate::codegen::parser::Parser as CodeParser;
 use crate::codegen::types::{ToCRepr, Type};
-
-pub type CompileResult<T> = Result<T, CompilationError>;
 
 pub struct Compiler {
     files: Vec<PathBuf>,
@@ -19,6 +18,7 @@ pub struct Compiler {
     includes: Vec<Include>,
     libs: Vec<String>,
     parser: CodeParser,
+    inferencer: TypeInferencer,
 }
 
 impl Compiler {
@@ -30,6 +30,7 @@ impl Compiler {
             includes: Vec::new(),
             libs,
             parser: CodeParser::new(),
+            inferencer: TypeInferencer::new(),
         }
     }
 
@@ -67,14 +68,15 @@ impl Compiler {
         })
     }
 
+    /// Generate C code from the AST and write it to the output path
     fn transpile_with_program(&mut self, prog: Program) {
-        let c_code = self.generate_c_code(prog);
+        let c_code = self.generate_c_code(&prog);
         if let Err(e) = std::fs::write(&self.c_output, c_code) {
             panic!("Failed to write output: {}", e);
         }
     }
 
-    fn generate_c_code(&self, prog: Program) -> String {
+    fn generate_c_code(&self, prog: &Program) -> String {
         let mut out = String::new();
 
         // emit regular includes from the source `include` statements
@@ -86,7 +88,7 @@ impl Compiler {
 
         let mut seen_headers = HashSet::new();
         // Vec preserves order
-        let mut seen_declarations = Vec::new();
+        let mut seen_declarations: Vec<String> = Vec::new();
 
         let mut collect_from_type = |t: &Type| {
             let ctype = t.to_c_repr();
@@ -102,15 +104,29 @@ impl Compiler {
 
         // scan every function signature & body for types to gather their headers/typedefs
         for func in &prog.functions {
-            if let Some(r) = &func.return_type {
+            // Use inferred return type
+            if let Some(ret_id) = func.inferred_return {
+                if let Ok(ty) = self.inferencer.store.resolve(ret_id) {
+                    collect_from_type(&ty);
+                }
+            } else if let Some(r) = &func.return_type {
                 collect_from_type(r);
             }
+
             for p in &func.params {
-                collect_from_type(&p.ty);
+                // Use inferred param type
+                if let Ok(ty) = self.inferencer.store.resolve(p.ty) {
+                    collect_from_type(&ty);
+                } else if let Some(ann) = &p.annotation {
+                    collect_from_type(ann);
+                }
             }
+
             for stmt in &func.body.stmts {
-                if let Stmt::VarDecl { ty: Some(t), .. } = stmt {
-                    collect_from_type(t);
+                if let Stmt::VarDecl { inferred, .. } = stmt
+                    && let Ok(ty) = self.inferencer.store.resolve(*inferred)
+                {
+                    collect_from_type(&ty);
                 }
             }
         }
@@ -126,11 +142,10 @@ impl Compiler {
             out.push_str(&decl);
             out.push('\n');
         }
-        out.push('\n');
 
         // emit functions as before...
-        for func in prog.functions {
-            out.push_str(&self.transpile_function(&func));
+        for func in &prog.functions {
+            out.push_str(&self.transpile_function(func));
             out.push_str("\n\n");
         }
         out
@@ -140,19 +155,31 @@ impl Compiler {
         let return_type = if func.name == "main" {
             "int".to_string()
         } else {
-            func.return_type
-                .as_ref()
-                .map_or("void".to_string(), |t| self.transpile_type(t))
+            // Try inferred return type first
+            func.inferred_return
+                .and_then(|id| self.inferencer.store.resolve(id).ok())
+                .map(|t| t.to_c_repr().name)
+                .or_else(|| func.return_type.as_ref().map(|t| t.to_c_repr().name))
+                .unwrap_or_else(|| "void".to_string())
         };
 
         let params = func
             .params
             .iter()
-            .map(|p| format!("{} {}", self.transpile_type(&p.ty), p.name))
+            .map(|p| {
+                let ty_name = self
+                    .inferencer
+                    .store
+                    .resolve(p.ty)
+                    .map(|t| t.to_c_repr().name)
+                    .or_else(|_| p.annotation.as_ref().map(|t| t.to_c_repr().name).ok_or(()))
+                    .unwrap_or("void*".to_string()); // Fallback
+                format!("{} {}", ty_name, p.name)
+            })
             .collect::<Vec<_>>()
             .join(", ");
 
-        let mut body = self.transpile_block(&func.body);
+        let mut body_code = self.transpile_block(&func.body);
 
         if func.name == "main" {
             let has_return = func
@@ -161,105 +188,112 @@ impl Compiler {
                 .iter()
                 .any(|stmt| matches!(stmt, Stmt::Return(_)));
             if !has_return {
-                body.push_str("    return 0;\n");
+                // Insert return 0 before the closing brace
+                if let Some(pos) = body_code.rfind('}') {
+                    body_code.insert_str(pos, "    return 0;\n");
+                }
             }
         }
 
-        format!("{} {}({}) {{\n{}}}", return_type, func.name, params, body)
+        format!("{} {}({}) {}", return_type, func.name, params, body_code)
     }
 
     fn transpile_block(&self, block: &Block) -> String {
-        let mut code = String::new();
+        let mut code = String::from("{\n");
         for stmt in &block.stmts {
-            match stmt {
-                Stmt::VarDecl { name, ty, init } => {
-                    let ty_str = if let Some(t) = ty {
-                        self.transpile_type(t)
-                    } else if let Some(Expr::Literal(Literal::Int(_))) = init {
-                        "int".to_string()
-                    } else {
-                        "auto".to_string()
-                    };
+            let stmt_code = match stmt {
+                Stmt::VarDecl {
+                    name,
+                    annotation: _,
+                    inferred,
+                    init,
+                } => {
+                    let ty_str = self
+                        .inferencer
+                        .store
+                        .resolve(*inferred)
+                        .map(|t| t.to_c_repr().name)
+                        .unwrap_or_else(|_| "auto".to_string());
+
                     match init {
                         Some(expr) => {
                             let init_str = self.transpile_expr(expr);
-                            code.push_str(&format!("{} {} = {};\n", ty_str, name, init_str));
+                            format!("{} {} = {};\n", ty_str, name, init_str)
                         }
                         None => {
-                            code.push_str(&format!("{} {};\n", ty_str, name));
+                            format!("{} {};\n", ty_str, name)
                         }
                     }
                 }
                 Stmt::Expr(expr) => {
-                    code.push_str(&self.transpile_expr(expr));
-                    code.push_str(";\n");
+                    format!("{};\n", self.transpile_expr(expr))
                 }
-                // TODO: should add a return to the main function anyway
                 Stmt::Return(expr) => {
-                    let expr_str = expr
-                        .as_ref()
-                        .map_or(String::new(), |e| format!(" {}", self.transpile_expr(e)));
-                    code.push_str(&format!("return{};\n", expr_str));
+                    if let Some(e) = expr {
+                        format!("return {};\n", self.transpile_expr(e))
+                    } else {
+                        "return;\n".to_string()
+                    }
                 }
                 Stmt::If {
                     cond,
                     then_branch,
                     else_branch,
                 } => {
-                    let cond_str = self.transpile_expr(cond);
-                    let then_code = self.transpile_block(then_branch);
-                    let mut if_str = format!("if ({}) {{\n{}}}", cond_str, then_code);
+                    let mut s = format!("if ({}) ", self.transpile_expr(cond));
+                    s.push_str(&self.transpile_block(then_branch));
                     if let Some(else_b) = else_branch {
-                        let else_code = self.transpile_block(else_b);
-                        if_str.push_str(&format!(" else {{\n{}}}", else_code));
+                        s.push_str(" else ");
+                        s.push_str(&self.transpile_block(else_b));
                     }
-                    code.push_str(&if_str);
+                    s.push('\n');
+                    s
                 }
                 Stmt::While { cond, body } => {
-                    let cond_str = self.transpile_expr(cond);
-                    let body_code = self.transpile_block(body);
-                    code.push_str(&format!("while ({}) {{\n{}}}", cond_str, body_code));
+                    let mut s = format!("while ({}) ", self.transpile_expr(cond));
+                    s.push_str(&self.transpile_block(body));
+                    s.push('\n');
+                    s
                 }
-                // Translate `for i in 10` to `for (int i = 0; i < 10; ++i)`
-                // Of course, this assumes `iter` (i) is an integer literal or expression that evaluates to an integer.
                 Stmt::For { var, iter, body } => {
-                    let body_code = self.transpile_block(body);
-                    match iter {
-                        Expr::RangeLiteral { start, end } => {
-                            // Handle range literals: `for i in 1...10`
-                            let start_str = self.transpile_expr(start);
-                            let end_str = self.transpile_expr(end);
-                            code.push_str(&format!(
-                                "for (int {} = {}; {} < {}; ++{}) {{\n{}}}",
-                                var, start_str, var, end_str, var, body_code
-                            ));
-                        }
-                        _ => {
-                            // Handle single integer expressions: `for i in 3`
-                            let iter_str = self.transpile_expr(iter);
-                            code.push_str(&format!(
-                                "for (int {} = 0; {} < {}; ++{}) {{\n{}}}",
-                                var, var, iter_str, var, body_code
-                            ));
-                        }
-                    }
+                    let mut s = if let Expr::RangeLiteral { start, end } = iter {
+                        let start_str = self.transpile_expr(start);
+                        let end_str = self.transpile_expr(end);
+                        format!(
+                            "for (int {} = {}; {} < {}; ++{}) ",
+                            var, start_str, var, end_str, var
+                        )
+                    } else {
+                        let iter_str = self.transpile_expr(iter);
+                        format!("for (int {} = 0; {} < {}; ++{}) ", var, var, iter_str, var)
+                    };
+                    s.push_str(&self.transpile_block(body));
+                    s.push('\n');
+                    s
                 }
-                Stmt::Break => {
-                    code.push_str("break;\n");
-                }
-                Stmt::Continue => {
-                    code.push_str("continue;\n");
-                }
+                Stmt::Break => "break;\n".to_string(),
+                Stmt::Continue => "continue;\n".to_string(),
+            };
+
+            for line in stmt_code.lines() {
+                code.push_str("    ");
+                code.push_str(line);
+                code.push('\n');
             }
         }
+        code.push('}');
         code
     }
 
     fn transpile_expr(&self, expr: &Expr) -> String {
         match expr {
-            Expr::Identifier(id) => id.clone(),
-            Expr::Literal(lit) => lit.to_c(),
-            Expr::Call { callee, args } => {
+            Expr::Identifier(name, _) => name.clone(),
+            Expr::Literal(lit, _) => lit.to_c(),
+            Expr::Call {
+                callee,
+                args,
+                ty: _,
+            } => {
                 let args_str = args
                     .iter()
                     .map(|a| self.transpile_expr(a))
@@ -267,49 +301,57 @@ impl Compiler {
                     .join(", ");
                 format!("{}({})", callee, args_str)
             }
-            Expr::UnaryOp { op, expr } => {
+            Expr::UnaryOp { op, expr, ty: _ } => {
                 let expr_str = self.transpile_expr(expr);
-                op.to_string_with_expr(expr_str)
+                format!("{}({})", op.to_c_str(), expr_str)
             }
-            Expr::BinaryOp { op, left, right } => {
+            Expr::BinaryOp {
+                op,
+                left,
+                right,
+                ty: _,
+            } => {
                 let left_str = self.transpile_expr(left);
                 let right_str = self.transpile_expr(right);
                 format!("({} {} {})", left_str, op.to_c_str(), right_str)
+            }
+            Expr::Assign {
+                op,
+                left,
+                right,
+                ty: _,
+            } => {
+                let left_str = self.transpile_expr(left);
+                let right_str = self.transpile_expr(right);
+                format!("{} {} {}", left_str, op.to_c_str(), right_str)
             }
             Expr::If {
                 cond,
                 then_branch,
                 else_branch,
+                ty: _,
             } => {
                 let cond_str = self.transpile_expr(cond);
                 let then_str = self.transpile_expr(then_branch);
                 let else_str = self.transpile_expr(else_branch);
-                format!("({}) ? ({}) : ({})", cond_str, then_str, else_str)
+                format!("({} ? {} : {})", cond_str, then_str, else_str)
             }
-            Expr::Assign { op, left, right } => {
-                let left_str = self.transpile_expr(left);
-                let right_str = self.transpile_expr(right);
-                format!("({} {} {})", left_str, op.to_c_str(), right_str)
-            }
-            Expr::RangeLiteral { start: _, end: _ } => {
-                // Range literals are not directly transpiled to C
-                // They are only used in for loop context
-                panic!("Range literals should only be used in for loop expressions")
+            Expr::RangeLiteral { .. } => {
+                // Should technically not be used alone, but return something safe to avoid panic
+                "/* range literal */ 0".to_string()
             }
         }
     }
 
-    fn transpile_type(&self, ty: &Type) -> String {
-        ty.to_c_repr().name
-    }
-
     pub fn compile(&mut self) -> CompileResult<()> {
-        let prog = self.parse()?;
+        let mut prog = self.parse()?;
+
+        self.inferencer.infer_program(&mut prog)?;
         self.transpile_with_program(prog);
 
         let detected = Toolchain::executable_path().ok_or(CompilationError::ToolchainNotFound)?;
 
-        // FIX: Handle non-UTF-8 paths
+        // TODO: Handle non-UTF-8 paths
         let target_path = self
             .output
             .clone()

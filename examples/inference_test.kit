@@ -1,0 +1,23 @@
+include "stdio.h";
+
+function add(a: Int, b: Int) {
+    return a + b;
+}
+
+function sub(a: Int, b: Int) {
+    return a - b;
+}
+
+function main() {
+    var x = 50;
+    var y = 20;
+    
+    var z = add(x, y);
+    z = sub(z, 5);
+    
+    var w = if z > 60 then 10 else 0;
+    
+    printf("Value of w: %d\n", w);
+    
+    return 0;
+}

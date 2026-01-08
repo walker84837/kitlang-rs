@@ -1,7 +1,7 @@
 //! The `codegen` module is responsible for generating executable code
 //! from the parsed Kit Abstract Syntax Tree (AST).
 //!
-//! It orchestrates the compilation process, translating the AST into an
+//! It orchestrates compilation process, translating AST into an
 //! intermediate representation and then into target-specific machine code.
 
 pub mod ast;
@@ -10,8 +10,8 @@ pub mod parser;
 pub use ast::{Block, Expr, Function, Include, Literal, Param, Program, Stmt};
 pub use compiler::Toolchain;
 
-/// Handles the initial parsing of Kitlang source files, constructs the
-/// Abstract Syntax Tree (AST), and orchestrates the generation of C code
+/// Handles the initial parsing of Kitlang source files, constructs
+/// Abstract Syntax Tree (AST), and orchestrates generation of C code
 /// from this AST.
 pub mod frontend;
 
@@ -20,3 +20,9 @@ pub mod frontend;
 /// expressions, and literals. It also handles the conversion logic between Kitlang
 /// and C type systems.
 pub mod types;
+
+/// Symbol table for tracking variables and functions during type inference.
+pub mod symbols;
+
+/// Type inference engine using Hindley-Milner algorithm.
+pub mod inference;

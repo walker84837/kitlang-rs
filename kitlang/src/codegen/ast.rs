@@ -5,7 +5,7 @@ use std::collections::HashSet;
 /// Represents a C header inclusion.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Include {
-    /// Path to the header file (e.g., "stdio.h").
+    /// Path to header file (e.g., "stdio.h").
     pub path: String,
 }
 
@@ -16,8 +16,10 @@ pub struct Function {
     pub name: String,
     /// List of function parameters.
     pub params: Vec<Param>,
-    /// Return type (`None` for void functions).
+    /// Return type annotation (`None` for void inference).
     pub return_type: Option<Type>,
+    /// Inferred return type ID.
+    pub inferred_return: Option<TypeId>,
     /// Function body as a block of statements.
     pub body: Block,
 }
@@ -27,8 +29,10 @@ pub struct Function {
 pub struct Param {
     /// Parameter name.
     pub name: String,
-    /// Parameter type.
-    pub ty: Type,
+    /// Parameter type annotation (if specified).
+    pub annotation: Option<Type>,
+    /// Inferred parameter type ID.
+    pub ty: TypeId,
 }
 
 /// Represents a block of statements (e.g., function body or scope block).
@@ -46,7 +50,9 @@ pub enum Stmt {
         /// Variable name.
         name: String,
         /// Type annotation (`None` for type inference).
-        ty: Option<Type>,
+        annotation: Option<Type>,
+        /// Inferred variable type ID.
+        inferred: TypeId,
         /// Initializer expression (`None` for uninitialized).
         init: Option<Expr>,
     },
@@ -89,15 +95,17 @@ pub enum Stmt {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Expr {
     /// Variable or function identifier.
-    Identifier(String),
+    Identifier(String, TypeId),
     /// Literal value.
-    Literal(Literal),
+    Literal(Literal, TypeId),
     /// Function call.
     Call {
         /// Name of the callee function.
         callee: String,
         /// Arguments passed to the function.
         args: Vec<Expr>,
+        /// Inferred return type.
+        ty: TypeId,
     },
     /// Unary operation.
     UnaryOp {
@@ -105,18 +113,24 @@ pub enum Expr {
         op: UnaryOperator,
         /// The operand expression.
         expr: Box<Expr>,
+        /// Inferred result type.
+        ty: TypeId,
     },
     /// Binary operation.
     BinaryOp {
         op: BinaryOperator,
         left: Box<Expr>,
         right: Box<Expr>,
+        /// Inferred result type.
+        ty: TypeId,
     },
     /// Assignment operation.
     Assign {
         op: AssignmentOperator,
         left: Box<Expr>,
         right: Box<Expr>,
+        /// Inferred result type.
+        ty: TypeId,
     },
     /// If-then-else expression.
     If {
@@ -126,6 +140,8 @@ pub enum Expr {
         then_branch: Box<Expr>,
         /// The expression to evaluate if the condition is false.
         else_branch: Box<Expr>,
+        /// Inferred result type.
+        ty: TypeId,
     },
     /// Range literal expression (e.g., `1...10`).
     RangeLiteral {

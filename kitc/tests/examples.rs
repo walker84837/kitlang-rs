@@ -77,9 +77,7 @@ fn run_example_test(
         .success();
 
     // TODO: executable files are actually generated in the CWD, not in the examples folder.
-    // This explains why the executable is not actually removed. But I don't get why these tests
-    // passed on Linux and Mac if std::fs::remove_file is supposed to also fail when the file
-    // doesn't exist.
+    // This explains why the executable is not actually generated in the examples folder.
     if let Err(err) = std::fs::remove_file(&executable_path) {
         log::error!("Failed to remove executable: {err}");
     }
@@ -173,6 +171,11 @@ fn test_block_comments() -> Result<(), Box<dyn std::error::Error>> {
 #[test]
 fn test_mixed_comments() -> Result<(), Box<dyn std::error::Error>> {
     run_example_test("mixed_comments", None)
+}
+
+#[test]
+fn test_inference() -> Result<(), Box<dyn std::error::Error>> {
+    run_example_test("inference_test", None)
 }
 
 #[test]

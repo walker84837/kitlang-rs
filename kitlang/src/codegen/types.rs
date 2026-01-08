@@ -6,29 +6,251 @@ use pest::iterators::Pair;
 use std::collections::HashSet;
 use std::str::FromStr;
 
-/// Trait for converting types to their C representation.
+/// Identity handle for a type in TypeStore.
 ///
-/// This trait should be implemented for any type that needs to be represented in generated C code.
-/// The conversion should include necessary header dependencies and any required type declarations.
-pub trait ToCRepr {
-    /// Converts `self` to its C representation.
-    fn to_c_repr(&self) -> CType;
+/// Types need stable identity for inference - we can't use the enum alone.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct TypeId(u32);
+
+impl Default for TypeId {
+    fn default() -> Self {
+        Self(u32::MAX)
+    }
 }
 
-// Blanket implementation for references to types that implement ToCRepr.
-// This allows calling `to_c_repr()` on references without explicit dereferencing.
-impl<T: ToCRepr> ToCRepr for &T {
-    fn to_c_repr(&self) -> CType {
-        (*self).to_c_repr()
+/// Identity handle for a type variable (unknown type during inference).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TypeVarId(u32);
+
+/// Represents a type variable used during inference.
+///
+/// Type variables start unbound and may later be bound to a TypeId.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TypeVar {
+    binding: Option<TypeId>,
+}
+
+/// Central type storage for type inference.
+///
+/// All type mutations go through here, making inference predictable.
+pub struct TypeStore {
+    nodes: Vec<TypeNode>,
+    type_vars: Vec<TypeVar>,
+    next_id: u32,
+}
+
+#[derive(Debug, Clone)]
+enum TypeNode {
+    /// Fully known Kit type
+    Known(Type),
+    /// Inference-only placeholder
+    Unknown(TypeVarId),
+}
+
+impl Default for TypeStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl TypeStore {
+    pub const fn new() -> Self {
+        Self {
+            nodes: Vec::new(),
+            type_vars: Vec::new(),
+            next_id: 0,
+        }
+    }
+
+    /// Create a new known type from a Type enum.
+    pub fn new_known(&mut self, ty: Type) -> TypeId {
+        let id = TypeId(self.next_id);
+        self.next_id += 1;
+        self.nodes.push(TypeNode::Known(ty));
+        id
+    }
+
+    /// Create a new unknown type (type variable) for inference.
+    pub fn new_unknown(&mut self) -> TypeId {
+        let var_id = TypeVarId(self.type_vars.len() as u32);
+        self.type_vars.push(TypeVar { binding: None });
+        let id = TypeId(self.next_id);
+        self.next_id += 1;
+        self.nodes.push(TypeNode::Unknown(var_id));
+        id
+    }
+
+    /// Bind a type variable to a specific type ID.
+    pub fn bind_type_var(&mut self, var_id: TypeVarId, ty: TypeId) -> Result<(), String> {
+        if let Some(existing) = self.type_vars.get_mut(var_id.0 as usize) {
+            if existing.binding.is_some() {
+                return Err(format!(
+                    "Type variable {:?} already bound to {:?}",
+                    var_id, existing.binding
+                ));
+            }
+            existing.binding = Some(ty);
+            Ok(())
+        } else {
+            Err(format!("Type variable {:?} does not exist", var_id))
+        }
+    }
+
+    /// Resolve a TypeId to its concrete Type.
+    ///
+    /// Follows type variable bindings. Returns error if any type variables remain unbound.
+    pub fn resolve(&self, mut id: TypeId) -> Result<Type, String> {
+        loop {
+            let Some(node) = self.nodes.get(id.0 as usize) else {
+                return Err(format!("Type ID {:?} does not exist", id));
+            };
+
+            id = match node {
+                TypeNode::Known(ty) => return Ok(ty.clone()),
+                TypeNode::Unknown(var_id) => self.resolve_var(id, *var_id)?,
+            };
+        }
+    }
+
+    fn resolve_var(&self, id: TypeId, var_id: TypeVarId) -> Result<TypeId, String> {
+        let Some(var) = self.type_vars.get(var_id.0 as usize) else {
+            return Err(format!(
+                "Type variable {var_id:?} does not exist in TypeStore",
+            ));
+        };
+
+        var.binding.ok_or_else(|| {
+            format!("Cannot resolve type ID {id:?}: type variable {var_id:?} is unbound",)
+        })
+    }
+
+    /// Check if a TypeId is an unknown type variable.
+    pub fn is_unknown(&self, id: TypeId) -> bool {
+        matches!(self.nodes.get(id.0 as usize), Some(TypeNode::Unknown(_)))
+    }
+
+    fn get_node(&self, id: TypeId) -> &TypeNode {
+        // We assume valid IDs here as they are managed by TypeStore
+        &self.nodes[id.0 as usize]
+    }
+
+    /// Follow bindings to find the representative TypeId.
+    pub fn find_rep(&self, mut id: TypeId) -> TypeId {
+        loop {
+            match self.nodes.get(id.0 as usize) {
+                Some(TypeNode::Unknown(var_id)) => {
+                    match self.type_vars.get(var_id.0 as usize) {
+                        Some(TypeVar {
+                            binding: Some(next_id),
+                        }) => id = *next_id,
+                        _ => return id, // Unbound
+                    }
+                }
+                _ => return id, // Known
+            }
+        }
+    }
+
+    /// Unify two type IDs (the core inference algorithm).
+    ///
+    /// Makes two types agree by either binding unknowns or comparing known types structurally.
+    pub fn unify(&mut self, a: TypeId, b: TypeId) -> Result<(), String> {
+        let rep_a = self.find_rep(a);
+        let rep_b = self.find_rep(b);
+
+        if rep_a == rep_b {
+            return Ok(());
+        }
+
+        match (self.get_node(rep_a).clone(), self.get_node(rep_b).clone()) {
+            // Unknown + Anything
+            (TypeNode::Unknown(var_id), _) => self.bind_type_var(var_id, rep_b),
+            (_, TypeNode::Unknown(var_id)) => self.bind_type_var(var_id, rep_a),
+
+            // Both Known -> structural comparison
+            (TypeNode::Known(ty_a), TypeNode::Known(ty_b)) => self.unify_types(ty_a, ty_b),
+        }
+    }
+
+    /// Unify two known Type enum values structurally.
+    fn unify_types(&mut self, a: Type, b: Type) -> Result<(), String> {
+        match (&a, &b) {
+            // Simple type equality
+            (Type::Int8, Type::Int8) => Ok(()),
+            (Type::Int16, Type::Int16) => Ok(()),
+            (Type::Int32, Type::Int32) => Ok(()),
+            (Type::Int64, Type::Int64) => Ok(()),
+            (Type::Uint8, Type::Uint8) => Ok(()),
+            (Type::Uint16, Type::Uint16) => Ok(()),
+            (Type::Uint32, Type::Uint32) => Ok(()),
+            (Type::Uint64, Type::Uint64) => Ok(()),
+            (Type::Float32, Type::Float32) => Ok(()),
+            (Type::Float64, Type::Float64) => Ok(()),
+            (Type::Int, Type::Int) | (Type::Int, Type::Bool) | (Type::Bool, Type::Int) => Ok(()),
+            (Type::Float, Type::Float) => Ok(()),
+            (Type::Size, Type::Size) => Ok(()),
+            (Type::Char, Type::Char) => Ok(()),
+            (Type::Bool, Type::Bool) => Ok(()),
+            (Type::CString, Type::CString) => Ok(()),
+            (Type::Void, Type::Void) => Ok(()),
+
+            // Pointer types: unify inner types
+            (Type::Ptr(t1), Type::Ptr(t2)) => self.unify_type_ids((**t1).clone(), (**t2).clone()),
+
+            // Tuple types: unify element-wise
+            (Type::Tuple(v1), Type::Tuple(v2)) => {
+                if v1.len() != v2.len() {
+                    return Err(format!(
+                        "Cannot unify tuples of different sizes: {} vs {}",
+                        v1.len(),
+                        v2.len()
+                    ));
+                }
+                for (elem1, elem2) in v1.iter().zip(v2.iter()) {
+                    self.unify_type_ids(elem1.clone(), elem2.clone())?;
+                }
+                Ok(())
+            }
+
+            // Array types: unify element type and length
+            (Type::CArray(elem1, len1), Type::CArray(elem2, len2)) => {
+                if len1 != len2 {
+                    return Err(format!(
+                        "Cannot unify arrays of different sizes: {:?} vs {:?}",
+                        len1, len2
+                    ));
+                }
+                self.unify_type_ids((**elem1).clone(), (**elem2).clone())
+            }
+
+            // Named types: check string equality
+            (Type::Named(n1), Type::Named(n2)) => {
+                if n1 == n2 {
+                    Ok(())
+                } else {
+                    Err(format!(
+                        "Cannot unify different named types: {} vs {}",
+                        n1, n2
+                    ))
+                }
+            }
+
+            // Everything else is a type mismatch
+            _ => Err(format!("Type mismatch: {:?} vs {:?}", a, b)),
+        }
+    }
+
+    /// Helper to unify boxed Type values.
+    fn unify_type_ids(&mut self, a: Type, b: Type) -> Result<(), String> {
+        let a_id = self.new_known(a);
+        let b_id = self.new_known(b);
+        self.unify(a_id, b_id)
     }
 }
 
 /// Represents a type in the Kit language.
 ///
-/// This enum covers both primitive C types and composite types. Note that floating-point variants
-/// don't implement `Eq` or `Hash` by default, but we manually derive `PartialEq` and `Hash` for
-/// practical usage in the compiler. The `Hash` implementation treats floating-point types as
-/// having fixed bit patterns (which is valid since we only hash known constant types).
+/// TODO: further description
 #[derive(Clone, Debug, PartialEq, Hash)]
 pub enum Type {
     /// User-defined named type (fallback for types not covered by other variants).
@@ -69,268 +291,252 @@ pub enum Type {
     CString,
     /// Tuple type (represented as a struct in C).
     Tuple(Vec<Type>),
-    /// C array type (fixed or variable length).
+    /// C array type (TODO: is this variable length or fixed length?).
     ///
-    /// The second field is `Some(n)` for fixed-size arrays or `None` for variable-length arrays.
-    CArray(Box<Type>, Option<usize>),
+    /// ...
+    CArray(Box<Type>, usize),
     /// Represents a void type (e.g., for functions with no return value).
     Void,
 }
 
 impl Type {
-    /// Converts a Kit type name to its internal representation.
-    ///
-    /// This handles built-in types directly and falls back to `Named` for user-defined types.
-    pub fn from_kit(s: &str) -> Self {
-        match s {
+    pub fn from_kit(name: &str) -> Self {
+        match name {
+            "Int8" => Type::Int8,
+            "Int16" => Type::Int16,
+            "Int32" => Type::Int32,
+            "Int64" => Type::Int64,
+            "Uint8" => Type::Uint8,
+            "Uint16" => Type::Uint16,
+            "Uint32" => Type::Uint32,
+            "Uint64" => Type::Uint64,
+            "Float32" => Type::Float32,
+            "Float64" => Type::Float64,
             "Int" => Type::Int,
             "Float" => Type::Float,
-            "Char" => Type::Char,
             "Size" => Type::Size,
-            "CString" => Type::CString,
+            "Char" => Type::Char,
             "Bool" => Type::Bool,
+            "CString" => Type::CString,
             "Void" => Type::Void,
-            other => Type::Named(other.to_string()),
+            _ => Type::Named(name.to_string()),
         }
     }
 }
-/// Unary operators supported in Kit expressions.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum UnaryOperator {
-    /// Logical NOT (`!`).
-    Not,
-    /// Arithmetic negation (`-`).
-    Negate,
-    /// Address-of operator (`&`).
-    AddressOf,
-    /// Pointer dereference (`*`).
-    Dereference,
-    /// Prefix increment (`++`).
-    Increment,
-    /// Prefix decrement (`--`).
-    Decrement,
-    /// Bitwise NOT (`~`).
-    BitwiseNot,
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+/// Represents ..., with ...
+pub struct CRepr {
+    pub name: String,
+    pub declaration: Option<String>,
+    pub headers: HashSet<String>,
 }
 
-impl UnaryOperator {
-    /// Formats the operator with its operand as a C expression string.
-    /// e.g. `to_string_with_expr("++", "x") -> "++x"`
-    pub fn to_string_with_expr(&self, expr: impl Into<String>) -> String {
-        let expr = expr.into();
+pub trait ToCRepr {
+    fn to_c_repr(&self) -> CRepr;
+}
+
+impl ToCRepr for Type {
+    fn to_c_repr(&self) -> CRepr {
         match self {
-            UnaryOperator::Not => format!("!{}", expr),
-            UnaryOperator::Negate => format!("-{}", expr),
-            UnaryOperator::AddressOf => format!("&{}", expr),
-            UnaryOperator::Dereference => format!("*{}", expr),
-            UnaryOperator::Increment => format!("++{}", expr),
-            UnaryOperator::Decrement => format!("--{}", expr),
-            UnaryOperator::BitwiseNot => format!("~{}", expr),
+            Type::Int8 => simple_c_type("int8_t", &["stdint.h"]),
+            Type::Int16 => simple_c_type("int16_t", &["stdint.h"]),
+            Type::Int32 => simple_c_type("int32_t", &["stdint.h"]),
+            Type::Int64 => simple_c_type("int64_t", &["stdint.h"]),
+            Type::Uint8 => simple_c_type("uint8_t", &["stdint.h"]),
+            Type::Uint16 => simple_c_type("uint16_t", &["stdint.h"]),
+            Type::Uint32 => simple_c_type("uint32_t", &["stdint.h"]),
+            Type::Uint64 => simple_c_type("uint64_t", &["stdint.h"]),
+            Type::Float32 => simple_c_type("float", &[]),
+            Type::Float64 => simple_c_type("double", &[]),
+            Type::Int => simple_c_type("int", &[]),
+            Type::Float => simple_c_type("float", &[]),
+            Type::Size => simple_c_type("size_t", &["stddef.h"]),
+            Type::Char => simple_c_type("char", &[]),
+            Type::Bool => simple_c_type("bool", &["stdbool.h"]),
+            Type::CString => simple_c_type("char*", &[]),
+            Type::Void => simple_c_type("void", &[]),
+            Type::Ptr(inner) => {
+                let inner_repr = inner.to_c_repr();
+                let headers = inner_repr.headers;
+                CRepr {
+                    name: format!("{}*", inner_repr.name),
+                    declaration: inner_repr.declaration,
+                    headers,
+                }
+            }
+            Type::Named(name) => simple_c_type(name, &[]),
+            _ => simple_c_type("void*", &[]), // Fallback
         }
     }
 }
 
-impl FromStr for UnaryOperator {
-    type Err = ();
-
-    /// Parses a unary operator from its string representation.
-    ///
-    /// Returns `Err(())` for invalid operator strings.
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "!" => Ok(UnaryOperator::Not),
-            "-" => Ok(UnaryOperator::Negate),
-            "&" => Ok(UnaryOperator::AddressOf),
-            "*" => Ok(UnaryOperator::Dereference),
-            "++" => Ok(UnaryOperator::Increment),
-            "--" => Ok(UnaryOperator::Decrement),
-            "~" => Ok(UnaryOperator::BitwiseNot),
-            _ => Err(()),
-        }
+fn simple_c_type(name: &str, headers: &[&str]) -> CRepr {
+    let mut h = HashSet::new();
+    for header in headers {
+        h.insert(format!("<{}>", header));
+    }
+    CRepr {
+        name: name.to_string(),
+        declaration: None,
+        headers: h,
     }
 }
 
-/// Binary operators supported in Kit expressions.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum BinaryOperator {
-    /// Additive
     Add,
-    /// Subtractive: `-`
-    Subtract,
-    // Multiplicative
-    Multiply,
-    /// Divide
-    Divide,
-    /// Modulo
-    Modulo,
-    /// Equality
+    Sub,
+    Mul,
+    Div,
+    Mod,
     Eq,
-    /// Negative equality
-    Neq,
-    /// Greater than
-    Gt,
-    /// Greater than or equal
-    Gte,
+    /// Not equal
+    Ne,
     /// Less than
     Lt,
+    /// Greater than
+    Gt,
     /// Less than or equal
-    Lte,
-    // Logical
+    Le,
+    /// Greater than or equal
+    Ge,
     And,
-    /// Logical
     Or,
-    /// Bitwise AND
-    BitwiseAnd,
-    /// Bitwise OR
-    BitwiseOr,
-    /// Bitwise XOR
-    BitwiseXor,
-    /// Bitwise left shift
-    BitwiseLeftShift,
-    /// Bitwise right shift
-    BitwiseRightShift,
-}
-
-impl BinaryOperator {
-    pub fn from_rule_pair(pair: &Pair<Rule>) -> Result<Self, CompilationError> {
-        match pair.as_rule() {
-            Rule::additive_op => match pair.as_str() {
-                "+" => Ok(BinaryOperator::Add),
-                "-" => Ok(BinaryOperator::Subtract),
-                _ => Err(CompilationError::InvalidOperator(format!(
-                    "Unknown additive operator: {}",
-                    pair.as_str()
-                ))),
-            },
-            Rule::multiplicative_op => match pair.as_str() {
-                "*" => Ok(BinaryOperator::Multiply),
-                "/" => Ok(BinaryOperator::Divide),
-                "%" => Ok(BinaryOperator::Modulo),
-                _ => Err(CompilationError::InvalidOperator(format!(
-                    "Unknown multiplicative operator: {}",
-                    pair.as_str()
-                ))),
-            },
-            Rule::eq_op => match pair.as_str() {
-                "==" => Ok(BinaryOperator::Eq),
-                "!=" => Ok(BinaryOperator::Neq),
-                _ => Err(CompilationError::InvalidOperator(format!(
-                    "Unknown equality operator: {}",
-                    pair.as_str()
-                ))),
-            },
-            Rule::comp_op => match pair.as_str() {
-                ">" => Ok(BinaryOperator::Gt),
-                ">=" => Ok(BinaryOperator::Gte),
-                "<" => Ok(BinaryOperator::Lt),
-                "<=" => Ok(BinaryOperator::Lte),
-                _ => Err(CompilationError::InvalidOperator(format!(
-                    "Unknown comparison operator: {}",
-                    pair.as_str()
-                ))),
-            },
-            Rule::and_ops => match pair.as_str() {
-                "&&" => Ok(BinaryOperator::And),
-                "&" => Ok(BinaryOperator::BitwiseAnd),
-                _ => unreachable!(), // Should not happen with atomic rules
-            },
-            Rule::logical_or_op => Ok(BinaryOperator::Or), // Use new logical_or_op
-            Rule::bitwise_or_op => Ok(BinaryOperator::BitwiseOr), // Use new bitwise_or_op
-            Rule::bitwise_xor_op => Ok(BinaryOperator::BitwiseXor),
-            Rule::shift_op => match pair.as_str() {
-                "<<" => Ok(BinaryOperator::BitwiseLeftShift),
-                ">>" => Ok(BinaryOperator::BitwiseRightShift),
-                _ => Err(CompilationError::InvalidOperator(format!(
-                    "Unknown shift operator: {}",
-                    pair.as_str()
-                ))),
-            },
-            _ => Err(CompilationError::InvalidOperator(format!(
-                "Unexpected rule for binary operator: {:?}",
-                pair.as_rule()
-            ))),
-        }
-    }
+    BitAnd,
+    BitOr,
+    BitXor,
+    /// Shift Left
+    Shl,
+    /// Shift Right
+    Shr,
 }
 
 impl BinaryOperator {
     pub fn to_c_str(&self) -> &'static str {
         match self {
             BinaryOperator::Add => "+",
-            BinaryOperator::Subtract => "-",
-            BinaryOperator::Multiply => "*",
-            BinaryOperator::Divide => "/",
-            BinaryOperator::Modulo => "%",
+            BinaryOperator::Sub => "-",
+            BinaryOperator::Mul => "*",
+            BinaryOperator::Div => "/",
+            BinaryOperator::Mod => "%",
             BinaryOperator::Eq => "==",
-            BinaryOperator::Neq => "!=",
-            BinaryOperator::Gt => ">",
-            BinaryOperator::Gte => ">=",
+            BinaryOperator::Ne => "!=",
             BinaryOperator::Lt => "<",
-            BinaryOperator::Lte => "<=",
+            BinaryOperator::Gt => ">",
+            BinaryOperator::Le => "<=",
+            BinaryOperator::Ge => ">=",
             BinaryOperator::And => "&&",
             BinaryOperator::Or => "||",
-            BinaryOperator::BitwiseAnd => "&",
-            BinaryOperator::BitwiseOr => "|",
-            BinaryOperator::BitwiseXor => "^",
-            BinaryOperator::BitwiseLeftShift => "<<",
-            BinaryOperator::BitwiseRightShift => ">>",
+            BinaryOperator::BitAnd => "&",
+            BinaryOperator::BitOr => "|",
+            BinaryOperator::BitXor => "^",
+            BinaryOperator::Shl => "<<",
+            BinaryOperator::Shr => ">>",
         }
     }
-}
 
-/// Assignment operators supported in Kit expressions.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum AssignmentOperator {
-    /// Simple assignment (`=`).
-    Assign,
-    /// Add and assign (`+=`).
-    AddAssign,
-    /// Subtract and assign (`-=`).
-    SubtractAssign,
-    /// Multiply and assign (`*=`).
-    MultiplyAssign,
-    /// Divide and assign (`/=`).
-    DivideAssign,
-    /// Modulo and assign (`%=`).
-    ModuloAssign,
-    /// Bitwise AND and assign (`&=`).
-    BitwiseAndAssign,
-    /// Bitwise OR and assign (`|=`).
-    BitwiseOrAssign,
-    /// Bitwise XOR and assign (`^=`).
-    BitwiseXorAssign,
-    /// Bitwise left shift and assign (`<<=`).
-    BitwiseLeftShiftAssign,
-    /// Bitwise right shift and assign (`>>=`).
-    BitwiseRightShiftAssign,
-}
-
-impl AssignmentOperator {
     pub fn from_rule_pair(pair: &Pair<Rule>) -> Result<Self, CompilationError> {
         match pair.as_rule() {
-            Rule::ASSIGN_OP => match pair.as_str() {
-                "=" => Ok(AssignmentOperator::Assign),
-                "+=" => Ok(AssignmentOperator::AddAssign),
-                "-=" => Ok(AssignmentOperator::SubtractAssign),
-                "*=" => Ok(AssignmentOperator::MultiplyAssign),
-                "/=" => Ok(AssignmentOperator::DivideAssign),
-                "%=" => Ok(AssignmentOperator::ModuloAssign),
-                "&=" => Ok(AssignmentOperator::BitwiseAndAssign),
-                "|=" => Ok(AssignmentOperator::BitwiseOrAssign),
-                "^=" => Ok(AssignmentOperator::BitwiseXorAssign),
-                "<<=" => Ok(AssignmentOperator::BitwiseLeftShiftAssign),
-                ">>=" => Ok(AssignmentOperator::BitwiseRightShiftAssign),
-                _ => Err(CompilationError::InvalidOperator(format!(
-                    "Unknown assignment operator: {}",
-                    pair.as_str()
-                ))),
+            Rule::additive_op => match pair.as_str() {
+                "+" => Ok(BinaryOperator::Add),
+                "-" => Ok(BinaryOperator::Sub),
+                _ => Err(CompilationError::InvalidOperator(pair.as_str().to_string())),
             },
+            Rule::multiplicative_op => match pair.as_str() {
+                "*" => Ok(BinaryOperator::Mul),
+                "/" => Ok(BinaryOperator::Div),
+                "%" => Ok(BinaryOperator::Mod),
+                _ => Err(CompilationError::InvalidOperator(pair.as_str().to_string())),
+            },
+            Rule::eq_op => match pair.as_str() {
+                "==" => Ok(BinaryOperator::Eq),
+                "!=" => Ok(BinaryOperator::Ne),
+                _ => Err(CompilationError::InvalidOperator(pair.as_str().to_string())),
+            },
+            Rule::comp_op => match pair.as_str() {
+                "<" => Ok(BinaryOperator::Lt),
+                ">" => Ok(BinaryOperator::Gt),
+                "<=" => Ok(BinaryOperator::Le),
+                ">=" => Ok(BinaryOperator::Ge),
+                _ => Err(CompilationError::InvalidOperator(pair.as_str().to_string())),
+            },
+            Rule::and_ops => Ok(BinaryOperator::And), // &&
+            Rule::logical_or_op => Ok(BinaryOperator::Or), // ||
+            Rule::bitwise_or_op => Ok(BinaryOperator::BitOr),
+            Rule::bitwise_xor_op => Ok(BinaryOperator::BitXor),
+            Rule::shift_op => match pair.as_str() {
+                "<<" => Ok(BinaryOperator::Shl),
+                ">>" => Ok(BinaryOperator::Shr),
+                _ => Err(CompilationError::InvalidOperator(pair.as_str().to_string())),
+            },
+            // Need to check specific logic for & vs && in grammar
             _ => Err(CompilationError::InvalidOperator(format!(
-                "Unexpected rule for assignment operator: {:?}",
+                "{:?}",
                 pair.as_rule()
             ))),
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum UnaryOperator {
+    Neg,
+    Not,
+    BitNot,
+    AddressOf,
+    Dereference,
+}
+
+impl UnaryOperator {
+    pub fn to_c_str(&self) -> &'static str {
+        match self {
+            UnaryOperator::Neg => "-",
+            UnaryOperator::Not => "!",
+            UnaryOperator::BitNot => "~",
+            UnaryOperator::AddressOf => "&",
+            UnaryOperator::Dereference => "*",
+        }
+    }
+}
+
+impl FromStr for UnaryOperator {
+    type Err = ();
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "-" => Ok(UnaryOperator::Neg),
+            "!" => Ok(UnaryOperator::Not),
+            "~" => Ok(UnaryOperator::BitNot),
+            // AddressOf is typically handled separately in parser due to grammar structure
+            _ => Err(()),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum AssignmentOperator {
+    /// Simple assignment
+    Assign,
+    /// Add assignment (+=)
+    AddAssign,
+    /// Subtract assignment (-=)
+    SubAssign,
+    /// Multiply assignment (*=)
+    MulAssign,
+    /// Divide assignment (/=)
+    DivAssign,
+    /// Modulo assignment (%=)
+    ModAssign,
+    /// Bitwise and assignment (&=)
+    AndAssign,
+    /// Bitwise or assignment (|=)
+    OrAssign,
+    /// Bitwise xor assignment (^=)
+    XorAssign,
+    /// Shift left assignment (<<=)
+    ShlAssign,
+    /// Shift right assignment (>>=)
+    ShrAssign,
 }
 
 impl AssignmentOperator {
@@ -338,217 +544,32 @@ impl AssignmentOperator {
         match self {
             AssignmentOperator::Assign => "=",
             AssignmentOperator::AddAssign => "+=",
-            AssignmentOperator::SubtractAssign => "-=",
-            AssignmentOperator::MultiplyAssign => "*=",
-            AssignmentOperator::DivideAssign => "/=",
-            AssignmentOperator::ModuloAssign => "%=",
-            AssignmentOperator::BitwiseAndAssign => "&=",
-            AssignmentOperator::BitwiseOrAssign => "|=",
-            AssignmentOperator::BitwiseXorAssign => "^=",
-            AssignmentOperator::BitwiseLeftShiftAssign => "<<=",
-            AssignmentOperator::BitwiseRightShiftAssign => ">>=",
-        }
-    }
-}
-/// C type representation for code generation.
-///
-/// This struct encapsulates all information needed to generate a C type:
-/// - The type name as it appears in C code
-/// - Required header dependencies
-/// - Optional type declaration (for structs or typedefs)
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct CType {
-    /// The C type name (e.g., "int", "MyStruct", "uint32_t").
-    pub name: String,
-    /// Headers required for this type (e.g., ["<stdint.h>"]).
-    pub headers: Vec<String>,
-    /// Custom declaration needed for this type (e.g., struct definitions).
-    /// `None` for primitive/built-in types.
-    pub declaration: Option<String>,
-}
-
-impl CType {
-    /// Creates a new C type representation with no headers or declaration.
-    fn new(name: impl Into<String>) -> Self {
-        Self {
-            name: name.into(),
-            headers: Vec::new(),
-            declaration: None,
+            AssignmentOperator::SubAssign => "-=",
+            AssignmentOperator::MulAssign => "*=",
+            AssignmentOperator::DivAssign => "/=",
+            AssignmentOperator::ModAssign => "%=",
+            AssignmentOperator::AndAssign => "&=",
+            AssignmentOperator::OrAssign => "|=",
+            AssignmentOperator::XorAssign => "^=",
+            AssignmentOperator::ShlAssign => "<<=",
+            AssignmentOperator::ShrAssign => ">>=",
         }
     }
 
-    /// Creates a C type that requires a specific header.
-    fn with_header(name: impl Into<String>, header: impl Into<String>) -> Self {
-        Self {
-            name: name.into(),
-            headers: vec![header.into()],
-            declaration: None,
-        }
-    }
-}
-
-/// Creates a sanitized C identifier from a Kit type.
-///
-/// This is used for generating struct names for tuples and arrays. The identifier:
-/// - Uses standard C fixed-width integer names (e.g., "int32_t" instead of "i32")
-/// - Uses "float" and "double" for floating-point types
-/// - Prefixes composite types with "__Kit" to avoid naming conflicts
-/// - Escapes type structures into valid C identifiers
-fn type_to_c_ident_string(t: &Type) -> String {
-    match t {
-        Type::Named(s) => s.clone(),
-        Type::Ptr(inner) => format!("{}_ptr", type_to_c_ident_string(inner)),
-        Type::Int8 => "int8_t".to_string(),
-        Type::Int16 => "int16_t".to_string(),
-        Type::Int32 => "int32_t".to_string(),
-        Type::Int64 => "int64_t".to_string(),
-        Type::Uint8 => "uint8_t".to_string(),
-        Type::Uint16 => "uint16_t".to_string(),
-        Type::Uint32 => "uint32_t".to_string(),
-        Type::Uint64 => "uint64_t".to_string(),
-        Type::Float32 => "float".to_string(),
-        Type::Float64 => "double".to_string(),
-        Type::Int => "int".to_string(),
-        Type::Float => "float".to_string(),
-        Type::Size => "size_t".to_string(),
-        Type::Char => "char".to_string(),
-        Type::Bool => "bool".to_string(),
-        Type::CString => "cstring".to_string(),
-        Type::Tuple(types) => {
-            let member_types = types
-                .iter()
-                .map(type_to_c_ident_string)
-                .collect::<Vec<_>>()
-                .join("_");
-            format!("__KitTuple_{}", member_types)
-        }
-        Type::CArray(inner, _) => format!("{}__KitArray", type_to_c_ident_string(inner)),
-        Type::Void => "void".to_string(),
-    }
-}
-
-impl ToCRepr for Type {
-    fn to_c_repr(&self) -> CType {
-        // small helper to reduce repetition for header-backed types
-        fn hdr(name: &str, header: &str) -> CType {
-            CType::with_header(name, header)
-        }
-
-        match self {
-            // fixed-width integer types -> <stdint.h>
-            Type::Int8 => hdr("int8_t", "<stdint.h>"),
-            Type::Int16 => hdr("int16_t", "<stdint.h>"),
-            Type::Int32 => hdr("int32_t", "<stdint.h>"),
-            Type::Int64 => hdr("int64_t", "<stdint.h>"),
-            Type::Uint8 => hdr("uint8_t", "<stdint.h>"),
-            Type::Uint16 => hdr("uint16_t", "<stdint.h>"),
-            Type::Uint32 => hdr("uint32_t", "<stdint.h>"),
-            Type::Uint64 => hdr("uint64_t", "<stdint.h>"),
-
-            Type::Float32 => CType::new("float"),
-            Type::Float64 => CType::new("double"),
-            Type::Int => CType::new("int"),
-            Type::Float => CType::new("float"),
-            Type::Size => CType::with_header("size_t", "<stddef.h>"),
-            Type::Char => CType::new("char"),
-            Type::Bool => CType::with_header("bool", "<stdbool.h>"),
-            Type::CString => CType::new("char*"),
-
-            Type::Ptr(inner) => {
-                let mut c = inner.to_c_repr();
-                c.name = format!("{}*", c.name); // clearer than push
-                c
-            }
-
-            // Transform a tuple type into a C struct definition
-            Type::Tuple(fields) => {
-                // Mangle each field's C identifier and join with '_', e.g., "i32_f64_..."
-                // to avoid name conflicts when tuples with same size have different types.
-                // In practice, this makes (Int, Int) and (Float, Float) two entirely
-                // different types when converted to C.
-                let type_names_mangled = fields
-                    .iter()
-                    .map(type_to_c_ident_string)
-                    .collect::<Vec<_>>()
-                    .join("_");
-
-                // Build a unique struct name using the mangled field list
-                let struct_name = format!("__KitTuple_{}", type_names_mangled);
-
-                // Collect all required headers and declarations from the fields
-                let mut all_headers = HashSet::new();
-                let mut all_declarations = Vec::new();
-
-                // Generate the struct members (like "int _0;") and gather headers/decls
-                let members = fields
-                    .iter()
-                    .enumerate()
-                    .map(|(i, f)| {
-                        let c = f.to_c_repr();
-
-                        // collect needed headers and declarations
-                        all_headers.extend(c.headers);
-                        if let Some(decl) = c.declaration {
-                            all_declarations.push(decl);
-                        }
-
-                        format!("    {} _{};\n", c.name, i) // struct member line
-                    })
-                    .collect::<String>();
-
-                // Append the full typedef for the tuple struct
-                all_declarations.push(format!(
-                    "typedef struct {{\n{}}} {};\n",
-                    members, struct_name
-                ));
-
-                // Return the C type description for the tuple
-                CType {
-                    name: struct_name,
-                    headers: all_headers.into_iter().collect(),
-                    declaration: Some(all_declarations.join("\n")),
-                }
-            }
-
-            // Transform a C-array type
-            Type::CArray(elem, len) => {
-                let base = elem.to_c_repr();
-
-                // Fixed-size array, like int[10]
-                if let Some(n) = len {
-                    let mut ctype = base;
-                    ctype.name = format!("{}[{}]", ctype.name, n);
-                    ctype
-                // Variable-length array: convert to wrapper struct with length + pointer
-                } else {
-                    let type_name_mangled = type_to_c_ident_string(elem);
-                    let struct_name = format!("__KitArray_{}", type_name_mangled);
-                    let decl = format!(
-                        "typedef struct {{\n    size_t len;\n    {} *data;\n}} {};\n",
-                        base.name, struct_name
-                    );
-
-                    // Gather headers (need <stddef.h> for size_t) and any nested decls
-                    let mut all_headers: HashSet<String> = base.headers.into_iter().collect();
-                    all_headers.insert("<stddef.h>".to_string());
-
-                    let mut all_declarations = Vec::new();
-                    if let Some(d) = base.declaration {
-                        all_declarations.push(d);
-                    }
-                    all_declarations.push(decl);
-
-                    CType {
-                        name: struct_name,
-                        headers: all_headers.into_iter().collect(),
-                        declaration: Some(all_declarations.join("\n")),
-                    }
-                }
-            }
-            Type::Void => CType::new("void"),
-
-            // User-defined types are assumed to be already declared elsewhere
-            Type::Named(name) => CType::new(name.to_string()),
+    pub fn from_rule_pair(pair: &Pair<Rule>) -> Result<Self, CompilationError> {
+        match pair.as_str() {
+            "=" => Ok(AssignmentOperator::Assign),
+            "+=" => Ok(AssignmentOperator::AddAssign),
+            "-=" => Ok(AssignmentOperator::SubAssign),
+            "*=" => Ok(AssignmentOperator::MulAssign),
+            "/=" => Ok(AssignmentOperator::DivAssign),
+            "%=" => Ok(AssignmentOperator::ModAssign),
+            "&=" => Ok(AssignmentOperator::AndAssign),
+            "|=" => Ok(AssignmentOperator::OrAssign),
+            "^=" => Ok(AssignmentOperator::XorAssign),
+            "<<=" => Ok(AssignmentOperator::ShlAssign),
+            ">>=" => Ok(AssignmentOperator::ShrAssign),
+            _ => Err(CompilationError::InvalidOperator(pair.as_str().to_string())),
         }
     }
 }

@@ -6,15 +6,15 @@ use crate::{Rule, parse_error};
 
 use super::ast::{Block, Expr, Function, Include, Literal, Param, Stmt};
 use super::frontend::CompileResult;
-use super::types::{AssignmentOperator, Type};
+use super::types::{AssignmentOperator, Type, TypeId};
 
 use std::path::PathBuf;
 use std::str::FromStr;
 
 #[derive(Default, Debug)]
 pub struct Parser {
-    current_file: Option<PathBuf>,
-    source_content: String,
+    _current_file: Option<PathBuf>,
+    _source_content: String,
 }
 
 impl Parser {
@@ -26,18 +26,9 @@ impl Parser {
         let source_content = std::fs::read_to_string(&file).unwrap_or_else(|_| String::new());
 
         Self {
-            current_file: Some(file),
-            source_content,
+            _current_file: Some(file),
+            _source_content: source_content,
         }
-    }
-
-    /// Gets the line content from a line number. Returns an empty string if the line does not exist
-    fn get_line_content(&self, line_num: usize) -> String {
-        self.source_content
-            .lines()
-            .nth(line_num.saturating_sub(1))
-            .unwrap_or("")
-            .to_string()
     }
 
     pub fn parse_include(&self, pair: Pair<Rule>) -> Include {
@@ -84,6 +75,7 @@ impl Parser {
             name,
             params,
             return_type,
+            inferred_return: None,
             body,
         })
     }
@@ -97,8 +89,12 @@ impl Parser {
                 // SAFETY: Grammar guarantees param has identifier and type
                 let name = inner.next().unwrap().as_str().to_string();
                 let type_node = inner.next().unwrap();
-                let ty = self.parse_type(type_node)?;
-                Ok(Param { name, ty })
+                let ty_ann = self.parse_type(type_node)?;
+                Ok(Param {
+                    name,
+                    annotation: Some(ty_ann),
+                    ty: TypeId::default(),
+                })
             })
             .collect()
     }
@@ -155,7 +151,12 @@ impl Parser {
         }
 
         let name = name.ok_or(parse_error!("var_decl missing identifier"))?;
-        Ok(Stmt::VarDecl { name, ty, init })
+        Ok(Stmt::VarDecl {
+            name,
+            annotation: ty,
+            inferred: TypeId::default(),
+            init,
+        })
     }
 
     fn parse_type(&self, pair: Pair<Rule>) -> CompileResult<Type> {
@@ -271,6 +272,7 @@ impl Parser {
                         op,
                         left: Box::new(left),
                         right: Box::new(right),
+                        ty: TypeId::default(),
                     };
                 }
                 Ok(left)
@@ -291,6 +293,7 @@ impl Parser {
                         Ok(Expr::UnaryOp {
                             op,
                             expr: Box::new(expr),
+                            ty: TypeId::default(),
                         })
                     }
                     Rule::ADDRESS_OF_OP => {
@@ -300,13 +303,17 @@ impl Parser {
                         Ok(Expr::UnaryOp {
                             op,
                             expr: Box::new(expr),
+                            ty: TypeId::default(),
                         })
                     }
                     Rule::primary => self.parse_expr(first_pair),
                     _other => Err(parse_error!("Unexpected rule in unary: {:?}", _other)),
                 }
             }
-            Rule::identifier => Ok(Expr::Identifier(pair.as_str().to_string())),
+            Rule::identifier => Ok(Expr::Identifier(
+                pair.as_str().to_string(),
+                TypeId::default(),
+            )),
             Rule::literal => {
                 // SAFETY: Grammar guarantees exactly one child in literal
                 let inner = pair.into_inner().next().unwrap();
@@ -320,21 +327,21 @@ impl Parser {
                                 let i = s.parse::<i64>().map_err(|e| {
                                     parse_error!("invalid integer literal '{s}': {:?}", e)
                                 })?;
-                                Ok(Expr::Literal(Literal::Int(i)))
+                                Ok(Expr::Literal(Literal::Int(i), TypeId::default()))
                             }
                             Rule::float => {
                                 let s = num_pair.as_str();
                                 let f = s.parse::<f64>().map_err(|e| {
                                     parse_error!("invalid float literal '{s}': {:?}", e)
                                 })?;
-                                Ok(Expr::Literal(Literal::Float(f)))
+                                Ok(Expr::Literal(Literal::Float(f), TypeId::default()))
                             }
                             _ => Err(parse_error!("Unexpected number type")),
                         }
                     }
                     Rule::boolean => match inner.as_str() {
-                        "true" => Ok(Expr::Literal(Literal::Bool(true))),
-                        "false" => Ok(Expr::Literal(Literal::Bool(false))),
+                        "true" => Ok(Expr::Literal(Literal::Bool(true), TypeId::default())),
+                        "false" => Ok(Expr::Literal(Literal::Bool(false), TypeId::default())),
                         _s => Err(parse_error!("invalid boolean literal: {}", _s)),
                     },
                     Rule::char_literal => todo!("char literal parsing not implemented"),
@@ -348,7 +355,7 @@ impl Parser {
                 let full = pair.as_str();
                 let inner = &full[1..full.len() - 1];
                 let unescaped = Self::unescape(inner).unwrap_or_else(|| inner.to_string());
-                Ok(Expr::Literal(Literal::String(unescaped)))
+                Ok(Expr::Literal(Literal::String(unescaped), TypeId::default()))
             }
             Rule::function_call_expr => {
                 let mut inner = pair.into_inner();
@@ -358,7 +365,11 @@ impl Parser {
                     .filter(|p: &Pair<Rule>| p.as_rule() == Rule::expr)
                     .map(|p: Pair<Rule>| self.parse_expr(p))
                     .collect::<Result<Vec<_>, _>>()?; // Collect and propagate errors
-                Ok(Expr::Call { callee, args })
+                Ok(Expr::Call {
+                    callee,
+                    args,
+                    ty: TypeId::default(),
+                })
             }
             Rule::if_expr => {
                 let mut inner = pair.into_inner();
@@ -369,13 +380,30 @@ impl Parser {
                     cond: Box::new(cond),
                     then_branch: Box::new(then_branch),
                     else_branch: Box::new(else_branch),
+                    ty: TypeId::default(),
                 })
             }
 
             Rule::primary => {
-                // SAFETY: Primary rule always has exactly one child
                 let inner = pair.into_inner().next().unwrap();
-                self.parse_expr(inner)
+                match inner.as_rule() {
+                    Rule::boolean => match inner.as_str() {
+                        "true" => Ok(Expr::Literal(Literal::Bool(true), TypeId::default())),
+                        "false" => Ok(Expr::Literal(Literal::Bool(false), TypeId::default())),
+                        _ => unreachable!(),
+                    },
+                    Rule::literal => self.parse_expr(inner),
+                    Rule::identifier => match inner.as_str() {
+                        "true" => Ok(Expr::Literal(Literal::Bool(true), TypeId::default())),
+                        "false" => Ok(Expr::Literal(Literal::Bool(false), TypeId::default())),
+                        "null" => Ok(Expr::Literal(Literal::Null, TypeId::default())),
+                        _ => Ok(Expr::Identifier(
+                            inner.as_str().to_string(),
+                            TypeId::default(),
+                        )),
+                    },
+                    _ => self.parse_expr(inner),
+                }
             }
             Rule::range_expr => {
                 let mut inner = pair.into_inner();
@@ -413,6 +441,7 @@ impl Parser {
                 op,
                 left: Box::new(left),
                 right: Box::new(right),
+                ty: TypeId::default(),
             })
         } else {
             // No assignment operator, so it's just the expression itself (the logical_or that formed the LHS)
