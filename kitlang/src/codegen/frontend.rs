@@ -270,11 +270,22 @@ impl Compiler {
                     inferred,
                     init,
                 } => {
-                    let ty_str = self
-                        .inferencer
-                        .store
-                        .resolve(*inferred)
-                        .map_or_else(|_| "auto".to_string(), |t| t.to_c_repr().name);
+                    let ty_str = self.inferencer.store.resolve(*inferred).map_or_else(
+                        |_| "auto".to_string(),
+                        |t| {
+                            // For Named types that are actually structs, use "struct <name>"
+                            if let Type::Named(name) = &t {
+                                // Check if this named type is a struct
+                                if self.inferencer.is_struct_type(name) {
+                                    format!("struct {}", name)
+                                } else {
+                                    t.to_c_repr().name
+                                }
+                            } else {
+                                t.to_c_repr().name
+                            }
+                        },
+                    );
 
                     match init {
                         Some(expr) => {
@@ -396,6 +407,48 @@ impl Compiler {
             Expr::RangeLiteral { .. } => {
                 // Should technically not be used alone, but return something safe to avoid panic
                 "/* range literal */ 0".to_string()
+            }
+            Expr::StructInit {
+                ty,
+                struct_type: _,
+                fields,
+            } => {
+                // Resolve struct type to get name
+                let struct_name = match self.inferencer.store.resolve(*ty) {
+                    Ok(t) => {
+                        if let Type::Struct { name, .. } = t {
+                            name
+                        } else if let Type::Named(name) = t {
+                            // For Named types that are structs, use the name
+                            name
+                        } else {
+                            "UNKNOWN_STRUCT".to_string()
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Warning: Failed to resolve struct type: {}", e);
+                        "UNKNOWN_STRUCT".to_string()
+                    }
+                };
+
+                // Generate field initializers using C99 designated initializers
+                let field_inits: Vec<String> = fields
+                    .iter()
+                    .map(|f| {
+                        let value = self.transpile_expr(&f.value);
+                        format!(".{} = {}", f.name, value)
+                    })
+                    .collect();
+
+                format!("(struct {}){{{}}}", struct_name, field_inits.join(", "))
+            }
+            Expr::FieldAccess {
+                expr,
+                field_name,
+                ty: _,
+            } => {
+                let expr_str = self.transpile_expr(expr);
+                format!("{}.{}", expr_str, field_name)
             }
         }
     }

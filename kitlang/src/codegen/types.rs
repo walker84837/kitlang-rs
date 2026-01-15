@@ -12,6 +12,13 @@ use std::str::FromStr;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct TypeId(u32);
 
+impl std::ops::Deref for TypeId {
+    type Target = TypeId;
+    fn deref(&self) -> &Self::Target {
+        self
+    }
+}
+
 impl Default for TypeId {
     fn default() -> Self {
         Self(u32::MAX)
@@ -100,9 +107,13 @@ impl TypeStore {
     /// Follows type variable bindings. Returns error if any type variables remain unbound.
     pub fn resolve(&self, mut id: TypeId) -> Result<Type, String> {
         loop {
-            let Some(node) = self.nodes.get(id.0 as usize) else {
-                return Err(format!("Type ID {id:?} does not exist"));
-            };
+            if id.0 as usize >= self.nodes.len() {
+                return Err(format!(
+                    "Type ID {id:?} does not exist (nodes.len() = {})",
+                    self.nodes.len()
+                ));
+            }
+            let node = &self.nodes[id.0 as usize];
 
             id = match node {
                 TypeNode::Known(ty) => return Ok(ty.clone()),

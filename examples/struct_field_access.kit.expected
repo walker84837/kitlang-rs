@@ -1,0 +1,4 @@
+Initial values: p.x = 10, p.y = 20
+Modified values: p.x = 30, p.y = 40
+Nested access: nested.x = 100
+Field access test passed!

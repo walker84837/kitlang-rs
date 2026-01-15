@@ -32,6 +32,12 @@ pub enum CompilationError {
     Io(std::io::Error),
 }
 
+impl From<String> for CompilationError {
+    fn from(s: String) -> Self {
+        CompilationError::TypeError(s)
+    }
+}
+
 /// Helper macro to create a `CompilationError::ParseError`
 #[macro_export]
 macro_rules! parse_error {

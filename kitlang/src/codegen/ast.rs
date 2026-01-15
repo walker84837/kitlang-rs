@@ -1,6 +1,6 @@
 use crate::codegen::types::{AssignmentOperator, BinaryOperator, Type, TypeId, UnaryOperator};
 
-use super::type_ast::StructDefinition;
+use super::type_ast::{FieldInit, StructDefinition};
 use std::collections::HashSet;
 
 /// Represents a C header inclusion.
@@ -150,6 +150,24 @@ pub enum Expr {
         start: Box<Expr>,
         /// The end of the range (inclusive).
         end: Box<Expr>,
+    },
+    /// Struct initialization expression (e.g., `Point { x: 10, y: 20 }`).
+    StructInit {
+        /// The struct type being instantiated (filled during inference).
+        ty: TypeId,
+        /// The parsed type annotation (for lookup during inference).
+        struct_type: Option<Type>,
+        /// Field initializers.
+        fields: Vec<FieldInit>,
+    },
+    /// Field access expression (e.g., `p.x` or `a.b.c`).
+    FieldAccess {
+        /// The expression to access field from.
+        expr: Box<Expr>,
+        /// The field name to access.
+        field_name: String,
+        /// Inferred result type.
+        ty: TypeId,
     },
 }
 

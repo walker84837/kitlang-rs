@@ -1,0 +1,23 @@
+include "stdio.h";
+
+struct Point {
+    var x: Int;
+    var y: Int;
+}
+
+function main() {
+    var p = struct Point { x: 10, y: 20 };
+
+    var px = p.x;
+    var py = p.y;
+    printf("Initial values: p.x = %d, p.y = %d\n", px, py);
+
+    p.x = 30;
+    p.y = 40;
+    printf("Modified values: p.x = %d, p.y = %d\n", p.x, p.y);
+
+    var nested = struct Point { x: 100, y: 200 };
+    printf("Nested access: nested.x = %d\n", nested.x);
+
+    printf("Field access test passed!\n");
+}

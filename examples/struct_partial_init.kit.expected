@@ -1,0 +1,5 @@
+Partial init Point (y should be 0): (10, 0)
+Default config: 800x600 - Window
+Partial config: 1024x600 - Window
+Full config: 1920x1080 - Full HD
+Partial initialization test passed!

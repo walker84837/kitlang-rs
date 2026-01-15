@@ -1,0 +1,28 @@
+include "stdio.h";
+
+struct Point {
+    var x: Int;
+    var y: Int = 0;
+}
+
+struct Config {
+    var width: Int = 800;
+    var height: Int = 600;
+    var title: CString = "Window";
+}
+
+function main() {
+    var p1 = struct Point { x: 10 };
+    printf("Partial init Point (y should be 0): (%d, %d)\n", p1.x, p1.y);
+
+    var c1 = struct Config { };
+    printf("Default config: %dx%d - %s\n", c1.width, c1.height, c1.title);
+
+    var c2 = struct Config { width: 1024 };
+    printf("Partial config: %dx%d - %s\n", c2.width, c2.height, c2.title);
+
+    var c3 = struct Config { width: 1920, height: 1080, title: "Full HD" };
+    printf("Full config: %dx%d - %s\n", c3.width, c3.height, c3.title);
+
+    printf("Partial initialization test passed!\n");
+}

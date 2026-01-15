@@ -5,7 +5,7 @@ use crate::error::CompilationError;
 use crate::{Rule, parse_error};
 
 use super::ast::{Block, Expr, Function, Include, Literal, Param, Stmt};
-use super::type_ast::{Field, StructDefinition};
+use super::type_ast::{Field, FieldInit, StructDefinition};
 use super::types::{AssignmentOperator, Type, TypeId};
 use crate::error::CompileResult;
 
@@ -163,12 +163,23 @@ impl Parser {
             .map(|type_pair| self.parse_type(type_pair))
             .transpose()?;
 
+        // Parse default expression if present
+        let default = Self::extract_default_expr(pair.clone())
+            .map(|expr_pair| self.parse_expr(expr_pair))
+            .transpose()?;
+
         Ok(Field {
             name,
             ty: TypeId::default(),
             annotation,
             is_const,
+            default,
         })
+    }
+
+    /// Extract the default expression from a var_decl pair
+    fn extract_default_expr(pair: Pair<'_, Rule>) -> Option<pest::iterators::Pair<'_, Rule>> {
+        pair.into_inner().find(|p| p.as_rule() == Rule::expr)
     }
 
     /// Parse type annotation from a var_decl pair
@@ -400,6 +411,7 @@ impl Parser {
                             ty: TypeId::default(),
                         })
                     }
+                    Rule::postfix => self.parse_expr(first_pair),
                     Rule::primary => self.parse_expr(first_pair),
                     other => Err(parse_error!("Unexpected rule in unary: {other:?}")),
                 }
@@ -514,6 +526,33 @@ impl Parser {
                 }
             }
 
+            Rule::postfix => {
+                // postfix = { primary ~ (postfix_field)* }
+                let mut inner = pair.into_inner();
+                let mut expr = self.parse_expr(inner.next().unwrap())?;
+
+                // Handle chained field access (.field1.field2.field3)
+                while let Some(field_pair) = inner.next() {
+                    if field_pair.as_rule() == Rule::postfix_field {
+                        let mut field_inner = field_pair.into_inner();
+                        let field_name = field_inner
+                            .next()
+                            .ok_or(parse_error!("Expected field name after '.'"))?
+                            .as_str()
+                            .to_string();
+                        expr = Expr::FieldAccess {
+                            expr: Box::new(expr),
+                            field_name,
+                            ty: TypeId::default(),
+                        };
+                    }
+                }
+
+                Ok(expr)
+            }
+
+            Rule::struct_init => self.parse_struct_init(pair),
+
             Rule::range_expr => {
                 let mut inner = pair.into_inner();
                 let start = self.parse_expr(inner.next().unwrap())?;
@@ -555,6 +594,35 @@ impl Parser {
             // No assignment operator, so it's just the expression itself (the logical_or that formed the LHS)
             Ok(left)
         }
+    }
+
+    fn parse_struct_init(&self, pair: Pair<Rule>) -> CompileResult<Expr> {
+        // struct_init = { "struct" ~ type_annotation ~ "{" ~ (field_init ~ ("," ~ field_init)*)? ~ "}" }
+        let mut inner = pair.into_inner();
+
+        // Parse type annotation to get the struct type
+        let type_pair = inner.next().unwrap();
+        let struct_ty = self.parse_type(type_pair)?;
+
+        // Parse field initializers
+        let fields: Vec<FieldInit> = inner
+            .filter(|p| p.as_rule() == Rule::field_init)
+            .map(|p| self.parse_field_init(p))
+            .collect::<Result<_, _>>()?;
+
+        Ok(Expr::StructInit {
+            ty: TypeId::default(),
+            struct_type: Some(struct_ty),
+            fields,
+        })
+    }
+
+    fn parse_field_init(&self, pair: Pair<Rule>) -> CompileResult<FieldInit> {
+        // field_init = { identifier ~ ":" ~ expr }
+        let mut inner = pair.into_inner();
+        let name = inner.next().unwrap().as_str().to_string();
+        let value = self.parse_expr(inner.next().unwrap())?;
+        Ok(FieldInit { name, value })
     }
 
     fn parse_bool_literal(s: &str) -> CompileResult<Expr> {

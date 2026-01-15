@@ -1,0 +1,26 @@
+include "stdio.h";
+
+struct Point {
+    var x: Int;
+    var y: Int;
+}
+
+struct Rectangle {
+    var top_left: Point;
+    var bottom_right: Point;
+}
+
+function main() {
+    var p = struct Point { x: 10, y: 20 };
+    printf("Point created: (%d, %d)\n", p.x, p.y);
+
+    var r = struct Rectangle {
+        top_left: struct Point { x: 0, y: 0 },
+        bottom_right: struct Point { x: 100, y: 50 }
+    };
+    printf("Rectangle: (%d, %d) to (%d, %d)\n",
+           r.top_left.x, r.top_left.y,
+           r.bottom_right.x, r.bottom_right.y);
+
+    printf("Struct initialization test passed!\n");
+}

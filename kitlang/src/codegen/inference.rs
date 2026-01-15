@@ -1,6 +1,6 @@
 use super::ast::{Block, Expr, Function, Literal, Program, Stmt};
 use super::symbols::SymbolTable;
-use super::type_ast::StructDefinition;
+use super::type_ast::{FieldInit, StructDefinition};
 use super::types::{BinaryOperator, Type, TypeId, TypeStore, UnaryOperator};
 use crate::error::{CompilationError, CompileResult};
 
@@ -26,6 +26,11 @@ impl TypeInferencer {
         }
     }
 
+    /// Check if a type name refers to a struct
+    pub fn is_struct_type(&self, name: &str) -> bool {
+        self.symbols.lookup_struct(name).is_some()
+    }
+
     /// Infer types for an entire program
     pub fn infer_program(&mut self, prog: &mut Program) -> CompileResult<()> {
         // First pass: register struct types
@@ -38,35 +43,48 @@ impl TypeInferencer {
         Ok(())
     }
 
-    /// Register struct types in the type store
+    /// Register struct types in the type store and symbol table
     fn register_struct_types(&mut self, structs: &[StructDefinition]) -> CompileResult<()> {
         for struct_def in structs {
-            // Build field type list
-            let field_types: Vec<(String, TypeId)> = struct_def
+            // Build field type list and update field types
+            let mut updated_fields = Vec::new();
+            for field in &struct_def.fields {
+                let field_type_id = if let Some(ann) = &field.annotation {
+                    self.store.new_known(ann.clone())
+                } else {
+                    self.store.new_unknown()
+                };
+                updated_fields.push(super::type_ast::Field {
+                    name: field.name.clone(),
+                    ty: field_type_id,
+                    annotation: field.annotation.clone(),
+                    is_const: field.is_const,
+                    default: field.default.clone(),
+                });
+            }
+
+            // Create updated struct definition with resolved field types
+            let updated_struct_def = super::type_ast::StructDefinition {
+                name: struct_def.name.clone(),
+                fields: updated_fields,
+            };
+
+            let field_types: Vec<(String, TypeId)> = updated_struct_def
                 .fields
                 .iter()
-                .map(|field| {
-                    let field_type_id = if let Some(ann) = &field.annotation {
-                        self.store.new_known(ann.clone())
-                    } else {
-                        // Fields should have type annotations, but if not, use unknown
-                        self.store.new_unknown()
-                    };
-                    (field.name.clone(), field_type_id)
-                })
+                .map(|field| (field.name.clone(), field.ty))
                 .collect();
 
             // Create struct type and register it
             let struct_type = Type::Struct {
-                name: struct_def.name.clone(),
+                name: updated_struct_def.name.clone(),
                 fields: field_types.clone(),
             };
 
             let _struct_type_id = self.store.new_known(struct_type);
 
-            // Update field type IDs with resolved types
-            // Note: This is a bit awkward because we're modifying the original struct
-            // For now, we'll rely on the annotation for type resolution during codegen
+            // Register updated struct in symbol table for field lookups
+            self.symbols.define_struct(updated_struct_def);
         }
         Ok(())
     }
@@ -398,6 +416,170 @@ impl TypeInferencer {
 
                 // Return a dummy type -> ranges don't have their own type
                 self.store.new_known(Type::Void)
+            }
+
+            Expr::StructInit {
+                ty,
+                struct_type,
+                fields,
+            } => {
+                // Resolve the struct type from the annotation
+                let resolved_ty = if let Some(ref st) = *struct_type {
+                    self.store.new_known(st.clone())
+                } else {
+                    return Err(CompilationError::TypeError(
+                        "StructInit missing type annotation".into(),
+                    ));
+                };
+
+                // Look up struct definition in symbol table using the resolved type
+                let struct_def = {
+                    let resolved = self.store.resolve(resolved_ty)?;
+                    match resolved {
+                        Type::Named(name) => {
+                            self.symbols.lookup_struct(&name).ok_or_else(|| {
+                                CompilationError::TypeError(format!("Unknown struct type '{name}'"))
+                            })?
+                        }
+                        Type::Struct { name, .. } => {
+                            self.symbols.lookup_struct(&name).ok_or_else(|| {
+                                CompilationError::TypeError(format!("Unknown struct type '{name}'"))
+                            })?
+                        }
+                        _ => {
+                            return Err(CompilationError::TypeError(
+                                "StructInit requires a struct type".into(),
+                            ));
+                        }
+                    }
+                };
+
+                // Build set of provided field names for validation
+                let provided_field_names: std::collections::HashSet<String> =
+                    fields.iter().map(|f| f.name.clone()).collect();
+
+                // Validate all provided fields exist in struct
+                for field_init in fields.iter() {
+                    if !struct_def.fields.iter().any(|f| f.name == field_init.name) {
+                        return Err(CompilationError::TypeError(format!(
+                            "Struct '{}' has no field '{}'",
+                            struct_def.name, field_init.name
+                        )));
+                    }
+                }
+
+                // Validate all required fields are provided or have defaults
+                for field_def in &struct_def.fields {
+                    if !provided_field_names.contains(&field_def.name) {
+                        if field_def.default.is_none() {
+                            return Err(CompilationError::TypeError(format!(
+                                "Struct '{}' field '{}' has no default value and was not provided in initialization",
+                                struct_def.name, field_def.name
+                            )));
+                        }
+                    }
+                }
+
+                // Collect field info we need (release struct_def borrow afterwards)
+                let field_infos: Vec<(String, Option<Type>, Option<super::ast::Expr>)> = struct_def
+                    .fields
+                    .iter()
+                    .map(|f| (f.name.clone(), f.annotation.clone(), f.default.clone()))
+                    .collect();
+
+                // Release the borrow on self.symbols
+                let _ = struct_def;
+
+                // Inject default values for missing fields
+                for field_info in &field_infos {
+                    let field_name = &field_info.0;
+                    if !provided_field_names.contains(field_name) {
+                        if let Some(default_expr) = &field_info.2 {
+                            // Clone the default expression and add it to fields
+                            fields.push(FieldInit {
+                                name: field_name.clone(),
+                                value: default_expr.clone(),
+                            });
+                        }
+                    }
+                }
+
+                // Infer types for all field initializer expressions (including defaults)
+                for field_init in fields.iter_mut() {
+                    // Find the corresponding field info
+                    let field_info = field_infos
+                        .iter()
+                        .find(|fi| fi.0 == field_init.name)
+                        .expect("field should exist");
+
+                    // Infer the type of the initializer expression directly (not cloned)
+                    let inferred_ty = self.infer_expr(&mut field_init.value)?;
+
+                    // Get the expected field type
+                    let expected_ty = if let Some(ref ann) = field_info.1 {
+                        self.store.new_known(ann.clone())
+                    } else {
+                        inferred_ty
+                    };
+
+                    // Unify
+                    self.unify(inferred_ty, expected_ty)?;
+                }
+
+                *ty = resolved_ty;
+                resolved_ty
+            }
+
+            Expr::FieldAccess {
+                expr,
+                field_name,
+                ty: field_ty,
+            } => {
+                let container_ty = self.infer_expr(expr)?;
+
+                // Resolve container type - handle both Struct and Named types
+                let resolved = self.store.resolve(container_ty)?;
+
+                // For Named types, we need to look up the struct definition
+                let (struct_name, fields) = match resolved {
+                    Type::Struct { name, fields } => (name, fields),
+                    Type::Named(type_name) => {
+                        if let Some(struct_def) = self.symbols.lookup_struct(&type_name) {
+                            // Convert struct fields to the format expected below
+                            let fields: Vec<(String, TypeId)> = struct_def
+                                .fields
+                                .iter()
+                                .map(|f| (f.name.clone(), f.ty))
+                                .collect();
+                            (type_name, fields)
+                        } else {
+                            return Err(CompilationError::TypeError(format!(
+                                "Cannot access field on unknown type '{}'",
+                                type_name
+                            )));
+                        }
+                    }
+                    _ => {
+                        return Err(CompilationError::TypeError(
+                            "Cannot access field on non-struct type".into(),
+                        ));
+                    }
+                };
+
+                // Look up field in struct
+                let field_type_id = fields
+                    .iter()
+                    .find(|(fname, _)| fname == field_name)
+                    .ok_or_else(|| {
+                        CompilationError::TypeError(format!(
+                            "Struct '{}' has no field '{}'",
+                            struct_name, field_name
+                        ))
+                    })?
+                    .1;
+
+                *field_ty = *field_type_id;
+                *field_type_id
             }
         };
 
