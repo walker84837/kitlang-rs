@@ -4,6 +4,9 @@ NEWLINE = _{ "\n" | "\r\n" }
 COMMENT_BLOCK = _{ "/*" ~ (!"*/" ~ ANY)* ~ "*/" }
 COMMENT_LINE = _{ "//" ~ (!NEWLINE ~ ANY)* ~ NEWLINE }
 
+var_kw = { "var" }
+const_kw = { "const" }
+
 program = _{ SOI ~ (import_stmt | include_stmt | function_decl | type_def | trait_def | trait_impl | rule_set | using_stmt)* ~ EOI }
 
 import_stmt = { "import" ~ path ~ ("." ~ ("*" | "**"))? ~ ";" }
@@ -44,7 +47,7 @@ statement = {
     rule_decl
 }
 
-var_decl = { ("var" | "const") ~ identifier ~ (":" ~ type_annotation)? ~ ("=" ~ expr)? ~ ";" }
+var_decl = { (var_kw | const_kw) ~ identifier ~ (":" ~ type_annotation)? ~ ("=" ~ expr)? ~ ";" }
 
 expr_stmt = { expr ~ ";" }
 

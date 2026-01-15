@@ -32,6 +32,20 @@ impl Parser {
         }
     }
 
+    /// Extract the first identifier from a pair's children (e.g., variable name, field name)
+    fn extract_first_identifier(pair: Pair<'_, Rule>) -> Option<String> {
+        pair.into_inner()
+            .find(|p| p.as_rule() == Rule::identifier)
+            .map(|p| p.as_str().to_string())
+    }
+
+    /// Check if a var_decl uses the 'const' keyword
+    fn is_const_var_decl(pair: Pair<'_, Rule>) -> bool {
+        pair.clone()
+            .into_inner()
+            .any(|p| p.as_rule() == Rule::const_kw)
+    }
+
     pub fn parse_include(&self, pair: Pair<Rule>) -> Include {
         // include_stmt = { "include" ~ string ~ ("=>" ~ string)? ~ ";" }
         let mut inner = pair.into_inner();
@@ -138,41 +152,29 @@ impl Parser {
     }
 
     fn parse_struct_field(&self, pair: Pair<Rule>) -> CompileResult<Field> {
-        // var_decl = { ("var" | "const") ~ ident ~ (":" ~ type_annotation)? ~ ("=" ~ expr)? ~ ";" }
-        let mut name: Option<String> = None;
-        let mut ty: Option<Type> = None;
-        let mut is_const = false;
+        // var_decl = { (var_kw | const_kw) ~ identifier ~ (":" ~ type_annotation)? ~ ("=" ~ expr)? ~ ";" }
+        let name = Self::extract_first_identifier(pair.clone())
+            .ok_or(parse_error!("struct field missing name"))?;
 
-        for child in pair.into_inner() {
-            match child.as_rule() {
-                Rule::identifier if name.is_none() => {
-                    name = Some(child.as_str().to_string());
-                }
-                Rule::type_annotation => {
-                    ty = Some(self.parse_type(child)?);
-                }
-                Rule::expr => {
-                    // Skip default value expressions for now
-                }
-                _ => {
-                    // Handle "var" or "const" keywords - they don't have specific rules
-                    // so they appear as generic tokens or are skipped
-                    let text = child.as_str();
-                    if text == "const" {
-                        is_const = true;
-                    }
-                }
-            }
-        }
+        let is_const = Self::is_const_var_decl(pair.clone());
 
-        let name = name.ok_or(parse_error!("struct field missing name"))?;
+        // Parse type annotation if present
+        let annotation = Self::extract_type_annotation(pair.clone())
+            .map(|type_pair| self.parse_type(type_pair))
+            .transpose()?;
 
         Ok(Field {
             name,
             ty: TypeId::default(),
-            annotation: ty,
+            annotation,
             is_const,
         })
+    }
+
+    /// Parse type annotation from a var_decl pair
+    fn extract_type_annotation(pair: Pair<'_, Rule>) -> Option<pest::iterators::Pair<'_, Rule>> {
+        pair.into_inner()
+            .find(|p| p.as_rule() == Rule::type_annotation)
     }
 
     fn parse_params(&self, pair: Pair<Rule>) -> CompileResult<Vec<Param>> {
@@ -222,35 +224,33 @@ impl Parser {
     }
 
     fn parse_var_decl(&self, pair: Pair<Rule>) -> CompileResult<Stmt> {
-        // var_decl = { ("var"|"const") ~ ident ~ (":" ~ type_annotation)? ~ ("=" ~ expr)? ~ ";" }
-        let mut name: Option<String> = None;
-        let mut ty: Option<Type> = None;
-        let mut init: Option<Expr> = None;
+        // var_decl = { (var_kw | const_kw) ~ identifier ~ (":" ~ type_annotation)? ~ ("=" ~ expr)? ~ ";" }
+        // Note: const_kw is silently consumed (not used for var_decl statements in current implementation)
 
-        for child in pair.into_inner() {
-            match child.as_rule() {
-                Rule::identifier if name.is_none() => {
-                    // first identifier is the var name
-                    name = Some(child.as_str().to_string());
-                }
-                Rule::type_annotation => {
-                    // e.g. ": CString"
-                    ty = Some(self.parse_type(child)?);
-                }
-                Rule::expr => {
-                    init = Some(self.parse_expr(child)?);
-                }
-                _ => { /* skip punctuation and the 'var'/'const' keyword */ }
-            }
-        }
+        let name = Self::extract_first_identifier(pair.clone())
+            .ok_or(parse_error!("var_decl missing identifier"))?;
 
-        let name = name.ok_or(parse_error!("var_decl missing identifier"))?;
+        // Parse type annotation if present
+        let annotation = Self::extract_type_annotation(pair.clone())
+            .map(|type_pair| self.parse_type(type_pair))
+            .transpose()?;
+
+        // Parse initializer expression if present
+        let init = Self::extract_init_expr(pair.clone())
+            .map(|expr_pair| self.parse_expr(expr_pair))
+            .transpose()?;
+
         Ok(Stmt::VarDecl {
             name,
-            annotation: ty,
+            annotation,
             inferred: TypeId::default(),
             init,
         })
+    }
+
+    /// Extract initializer expression from a var_decl pair
+    fn extract_init_expr(pair: Pair<'_, Rule>) -> Option<pest::iterators::Pair<'_, Rule>> {
+        pair.into_inner().find(|p| p.as_rule() == Rule::expr)
     }
 
     fn parse_type(&self, pair: Pair<Rule>) -> CompileResult<Type> {

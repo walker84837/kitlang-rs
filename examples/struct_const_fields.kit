@@ -1,0 +1,21 @@
+include "stdio.h";
+
+struct Point {
+    var x: Int;
+    var y: Int;
+}
+
+struct Player {
+    var name: CString;
+    const health: Float;
+    var position: Point;
+}
+
+struct Constants {
+    const value1: Int = 42;
+    const value2: Int = 100;
+}
+
+function main() {
+    printf("Struct definitions with const fields compiled successfully!\n");
+}
