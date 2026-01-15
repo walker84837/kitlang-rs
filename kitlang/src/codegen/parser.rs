@@ -5,6 +5,7 @@ use crate::error::CompilationError;
 use crate::{Rule, parse_error};
 
 use super::ast::{Block, Expr, Function, Include, Literal, Param, Stmt};
+use super::type_ast::{Field, StructDefinition};
 use super::types::{AssignmentOperator, Type, TypeId};
 use crate::error::CompileResult;
 
@@ -77,6 +78,100 @@ impl Parser {
             return_type,
             inferred_return: None,
             body,
+        })
+    }
+
+    pub fn parse_struct_def(&self, pair: Pair<Rule>) -> CompileResult<StructDefinition> {
+        // struct_def = { "struct" ~ identifier ~ type_params? ~ "{" ~ (var_decl)* ~ "}" }
+        let mut inner = pair.into_inner();
+
+        // First child should be the struct name (identifier)
+        // The "struct" keyword is consumed when matching the rule itself
+        let name = inner
+            .next()
+            .filter(|p| p.as_rule() == Rule::identifier)
+            .ok_or(parse_error!("struct definition missing name"))?
+            .as_str()
+            .to_string();
+
+        // Skip type_params if present
+        while let Some(peek) = inner.peek() {
+            if peek.as_rule() == Rule::type_params {
+                let _ = inner.next();
+            } else {
+                break;
+            }
+        }
+
+        // Collect var_decl rules from the remaining children
+        // The struct body contains var_decl elements directly (not wrapped in a block rule)
+        let fields: Vec<Field> = inner
+            .filter(|p| p.as_rule() == Rule::var_decl)
+            .map(|p| self.parse_struct_field(p))
+            .collect::<Result<_, _>>()?;
+
+        if fields.is_empty() {
+            log::warn!("Struct '{}' has empty body", name);
+        }
+
+        Ok(StructDefinition { name, fields })
+    }
+
+    /// Parse a struct definition from a type_def rule wrapper
+    pub fn parse_struct_def_from_type_def(
+        &self,
+        pair: Pair<Rule>,
+    ) -> CompileResult<StructDefinition> {
+        // Find the struct_def rule within the type_def
+        let mut found_struct = None;
+        for child in pair.into_inner() {
+            if child.as_rule() == Rule::struct_def {
+                found_struct = Some(child);
+                break;
+            }
+        }
+
+        let struct_def_pair =
+            found_struct.ok_or(parse_error!("type_def does not contain struct_def"))?;
+
+        self.parse_struct_def(struct_def_pair)
+    }
+
+    fn parse_struct_field(&self, pair: Pair<Rule>) -> CompileResult<Field> {
+        // var_decl = { ("var" | "const") ~ ident ~ (":" ~ type_annotation)? ~ ("=" ~ expr)? ~ ";" }
+        let mut name: Option<String> = None;
+        let mut ty: Option<Type> = None;
+        let mut is_const = false;
+
+        for child in pair.into_inner() {
+            match child.as_rule() {
+                Rule::identifier if name.is_none() => {
+                    name = Some(child.as_str().to_string());
+                }
+                Rule::type_annotation => {
+                    ty = Some(self.parse_type(child)?);
+                }
+                Rule::expr => {
+                    // Skip default value expressions for now
+                }
+                _ => {
+                    // Handle "var" or "const" keywords - they don't have specific rules
+                    // so they appear as generic tokens or are skipped
+                    let text = child.as_str();
+                    if text == "const" {
+                        is_const = true;
+                    }
+                }
+            }
+        }
+
+        let name = name.ok_or(parse_error!("struct field missing name"))?;
+
+        Ok(Field {
+            name,
+            ty: TypeId::default(),
+            annotation: ty,
+            is_const,
         })
     }
 

@@ -178,6 +178,11 @@ fn test_inference() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test]
+fn test_struct_definition() -> Result<(), Box<dyn std::error::Error>> {
+    run_example_test("struct_definition", None)
+}
+
+#[test]
 fn test_nested_comments() -> Result<(), Box<dyn std::error::Error>> {
     let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()

@@ -292,6 +292,13 @@ pub enum Type {
     CArray(Box<Type>, usize),
     /// Represents a void type (e.g., for functions with no return value).
     Void,
+    /// User-defined struct type.
+    Struct {
+        /// Struct name (e.g., "Point").
+        name: String,
+        /// Field definitions for the struct.
+        fields: Vec<(String, TypeId)>,
+    },
 }
 
 impl Type {
@@ -359,8 +366,26 @@ impl ToCRepr for Type {
                     headers,
                 }
             }
+            Type::Tuple(_elements) => CRepr {
+                name: "/* tuple */ void*".to_string(),
+                declaration: None,
+                headers: HashSet::new(),
+            },
+            Type::CArray(elem_type, size) => {
+                let elem_repr = elem_type.to_c_repr();
+                let size_str = size.to_string();
+                CRepr {
+                    name: format!("{}*{}", elem_repr.name, size_str),
+                    declaration: None,
+                    headers: elem_repr.headers,
+                }
+            }
             Type::Named(name) => simple_c_type(name, &[]),
-            _ => simple_c_type("void*", &[]), // Fallback
+            Type::Struct { name, fields: _ } => CRepr {
+                name: format!("struct {}", name),
+                declaration: None,
+                headers: HashSet::new(),
+            },
         }
     }
 }

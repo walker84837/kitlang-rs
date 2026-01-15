@@ -1,5 +1,6 @@
 use crate::codegen::types::{AssignmentOperator, BinaryOperator, Type, TypeId, UnaryOperator};
 
+use super::type_ast::StructDefinition;
 use std::collections::HashSet;
 
 /// Represents a C header inclusion.
@@ -210,4 +211,6 @@ pub struct Program {
     pub imports: HashSet<String>,
     /// Top-level function definitions.
     pub functions: Vec<Function>,
+    /// Struct type definitions.
+    pub structs: Vec<StructDefinition>,
 }

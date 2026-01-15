@@ -1,5 +1,6 @@
 use super::ast::{Block, Expr, Function, Literal, Program, Stmt};
 use super::symbols::SymbolTable;
+use super::type_ast::StructDefinition;
 use super::types::{BinaryOperator, Type, TypeId, TypeStore, UnaryOperator};
 use crate::error::{CompilationError, CompileResult};
 
@@ -27,8 +28,45 @@ impl TypeInferencer {
 
     /// Infer types for an entire program
     pub fn infer_program(&mut self, prog: &mut Program) -> CompileResult<()> {
+        // First pass: register struct types
+        self.register_struct_types(&prog.structs)?;
+
+        // Second pass: infer function types
         for func in &mut prog.functions {
             self.infer_function(func)?;
+        }
+        Ok(())
+    }
+
+    /// Register struct types in the type store
+    fn register_struct_types(&mut self, structs: &[StructDefinition]) -> CompileResult<()> {
+        for struct_def in structs {
+            // Build field type list
+            let field_types: Vec<(String, TypeId)> = struct_def
+                .fields
+                .iter()
+                .map(|field| {
+                    let field_type_id = if let Some(ann) = &field.annotation {
+                        self.store.new_known(ann.clone())
+                    } else {
+                        // Fields should have type annotations, but if not, use unknown
+                        self.store.new_unknown()
+                    };
+                    (field.name.clone(), field_type_id)
+                })
+                .collect();
+
+            // Create struct type and register it
+            let struct_type = Type::Struct {
+                name: struct_def.name.clone(),
+                fields: field_types.clone(),
+            };
+
+            let _struct_type_id = self.store.new_known(struct_type);
+
+            // Update field type IDs with resolved types
+            // Note: This is a bit awkward because we're modifying the original struct
+            // For now, we'll rely on the annotation for type resolution during codegen
         }
         Ok(())
     }

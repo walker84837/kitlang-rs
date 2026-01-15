@@ -11,6 +11,7 @@ use crate::codegen::ast::{Block, Expr, Function, Include, Program, Stmt};
 use crate::codegen::compiler::{CompilerMeta, CompilerOptions, Toolchain};
 use crate::codegen::inference::TypeInferencer;
 use crate::codegen::parser::Parser as CodeParser;
+use crate::codegen::type_ast::StructDefinition;
 use crate::codegen::types::{ToCRepr, Type};
 
 pub struct Compiler {
@@ -39,6 +40,7 @@ impl Compiler {
     fn parse(&mut self) -> CompileResult<Program> {
         let mut includes = Vec::new();
         let mut functions = Vec::new();
+        let mut structs = Vec::new();
 
         // TODO: track which files are UTF-8 formatted:
         // - true = UTF-8
@@ -55,7 +57,11 @@ impl Compiler {
             for pair in pairs {
                 match pair.as_rule() {
                     Rule::include_stmt => includes.push(self.parser.parse_include(pair)),
-                    Rule::function_decl => functions.push(self.parser.parse_function(pair)?), // Propagate error
+                    Rule::function_decl => functions.push(self.parser.parse_function(pair)?),
+                    Rule::type_def => {
+                        let struct_def = self.parser.parse_struct_def_from_type_def(pair)?;
+                        structs.push(struct_def);
+                    }
                     _ => {}
                 }
             }
@@ -67,6 +73,7 @@ impl Compiler {
             includes,
             imports: HashSet::new(),
             functions,
+            structs,
         })
     }
 
@@ -103,6 +110,12 @@ impl Compiler {
                 seen_declarations.push(d);
             }
         };
+
+        // Emit struct declarations first
+        for struct_def in &prog.structs {
+            out.push_str(&self.generate_struct_declaration(struct_def, &prog.structs));
+            out.push('\n');
+        }
 
         // scan every function signature & body for types to gather their headers/typedefs
         for func in &prog.functions {
@@ -151,6 +164,53 @@ impl Compiler {
             out.push_str("\n\n");
         }
         out
+    }
+
+    fn generate_struct_declaration(
+        &self,
+        struct_def: &StructDefinition,
+        all_structs: &[StructDefinition],
+    ) -> String {
+        let field_decls: Vec<String> = struct_def
+            .fields
+            .iter()
+            .map(|field| {
+                // Resolve field type
+                let ty = self
+                    .inferencer
+                    .store
+                    .resolve(field.ty)
+                    .ok()
+                    .or(field.annotation.as_ref().cloned())
+                    .unwrap_or(Type::Void);
+
+                let c_repr = ty.to_c_repr();
+
+                // Apply const modifier if present
+                let prefix = if field.is_const { "const " } else { "" };
+
+                // Get type name, handling struct references correctly
+                let type_name = if let Type::Named(name) = &ty {
+                    // Check if this named type is actually a struct definition
+                    let is_struct = all_structs.iter().any(|s| s.name == *name);
+                    if is_struct {
+                        format!("struct {}", name)
+                    } else {
+                        c_repr.name.clone()
+                    }
+                } else {
+                    c_repr.name.clone()
+                };
+
+                format!("    {}{} {};", prefix, type_name, field.name)
+            })
+            .collect();
+
+        format!(
+            "struct {} {{\n{}\n}};",
+            struct_def.name,
+            field_decls.join("\n")
+        )
     }
 
     fn transpile_function(&self, func: &Function) -> String {
