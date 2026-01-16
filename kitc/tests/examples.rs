@@ -188,6 +188,16 @@ fn test_struct_const_fields() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test]
+fn test_enum_basic() -> Result<(), Box<dyn std::error::Error>> {
+    run_example_test("enum_basic", None)
+}
+
+#[test]
+fn test_enum_defaults() -> Result<(), Box<dyn std::error::Error>> {
+    run_example_test("enum_defaults", None)
+}
+
+#[test]
 fn test_nested_comments() -> Result<(), Box<dyn std::error::Error>> {
     let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
