@@ -1,6 +1,6 @@
 use crate::codegen::types::{AssignmentOperator, BinaryOperator, Type, TypeId, UnaryOperator};
 
-use super::type_ast::{FieldInit, StructDefinition};
+use super::type_ast::{EnumDefinition, FieldInit, StructDefinition};
 use std::collections::HashSet;
 
 /// Represents a C header inclusion.
@@ -169,6 +169,26 @@ pub enum Expr {
         /// Inferred result type.
         ty: TypeId,
     },
+    /// Enum variant constructor (simple variant without arguments).
+    EnumVariant {
+        /// The enum type name.
+        enum_name: String,
+        /// The variant name.
+        variant_name: String,
+        /// Inferred type.
+        ty: TypeId,
+    },
+    /// Enum initialization (variant with arguments).
+    EnumInit {
+        /// The enum type name.
+        enum_name: String,
+        /// The variant name.
+        variant_name: String,
+        /// Arguments to the variant constructor.
+        args: Vec<Expr>,
+        /// Inferred type.
+        ty: TypeId,
+    },
 }
 
 /// Represents literal values in Kit.
@@ -231,4 +251,6 @@ pub struct Program {
     pub functions: Vec<Function>,
     /// Struct type definitions.
     pub structs: Vec<StructDefinition>,
+    /// Enum type definitions.
+    pub enums: Vec<EnumDefinition>,
 }

@@ -1,0 +1,25 @@
+include "stdio.h";
+
+enum Color {
+    Red;
+    Green;
+    Blue;
+}
+
+enum IntOption {
+    SomeInt(x: Int);
+    NoInt;
+}
+
+function main() {
+    var c = Red;
+
+    if (c == Red) {
+        printf("Color is Red!\n");
+    }
+
+    var opt1 = SomeInt(42);
+    var opt2 = NoInt;
+
+    printf("Done!\n");
+}

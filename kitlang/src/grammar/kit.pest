@@ -18,7 +18,7 @@ function_decl = {
 }
 
 params = { param ~ ("," ~ param)* }
-param = { identifier ~ ":" ~ type_annotation }
+param = { identifier ~ ":" ~ type_annotation ~ ( "=" ~ expr )? }
 
 type_annotation = { function_type | pointer_type | tuple_type | base_type }
 function_type = { "function" ~ "(" ~ (type_annotation ~ ("," ~ type_annotation)*)? ~ ")" ~ "->" ~ type_annotation }

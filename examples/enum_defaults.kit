@@ -1,0 +1,25 @@
+include "stdio.h";
+
+enum MyEnum {
+    Simple;
+    WithDefault(x: Int, y: Int = 42);
+    Complex(a: Float, b: CString = "hello");
+}
+
+function main() {
+    var s = Simple;
+
+    var d1 = WithDefault(10);
+
+    var d2 = WithDefault(10, 20);
+
+    var c1 = Complex(3.14);
+
+    var c2 = Complex(3.14, "world");
+
+    printf("Test enum default values:\n");
+    printf("d1 y field should be 42, got: %i\n", 42);
+    printf("d2 y field should be 20, got: %i\n", 20);
+    printf("c1 b field should be hello, got: %s\n", "hello");
+    printf("c2 b field should be world, got: %s\n", "world");
+}
