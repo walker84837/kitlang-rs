@@ -43,48 +43,48 @@ impl Compiler {
         let mut structs = Vec::new();
         let mut enums = Vec::new();
 
-        // TODO: track which files are UTF-8 formatted:
-        // - true = UTF-8
-        // - false = binary (NOT ACCEPTED)
-        // each files correspond to an index in the `files` vector
-        let _files = vec![false; self.files.len()];
+        // Track file encoding (future-proofing)
+        // true = UTF-8, false = binary (rejected)
+        let mut files_utf8 = vec![true; self.files.len()];
 
-        for file in &self.files {
-            let input = std::fs::read_to_string(file).map_err(CompilationError::Io)?;
+        for (idx, file) in self.files.iter().enumerate() {
+            let input = match std::fs::read_to_string(file) {
+                Ok(content) => content,
+                Err(err) => {
+                    files_utf8[idx] = false;
+                    return Err(CompilationError::Io(err));
+                }
+            };
 
             let pairs = KitParser::parse(Rule::program, &input)
                 .map_err(|e| CompilationError::ParseError(e.to_string()))?;
 
             for pair in pairs {
                 match pair.as_rule() {
-                    Rule::include_stmt => includes.push(self.parser.parse_include(pair)),
-                    Rule::function_decl => functions.push(self.parser.parse_function(pair)?),
-                    Rule::type_def => {
-                        let mut found_enum = None;
-                        let mut found_struct = None;
+                    Rule::include_stmt => {
+                        includes.push(self.parser.parse_include(pair));
+                    }
 
-                        for child in pair.clone().into_inner() {
+                    Rule::function_decl => {
+                        functions.push(self.parser.parse_function(pair)?);
+                    }
+
+                    Rule::type_def => {
+                        for child in pair.into_inner() {
                             match child.as_rule() {
                                 Rule::enum_def => {
-                                    found_enum = Some(child);
+                                    enums.push(self.parser.parse_enum_def(child)?);
                                     break;
                                 }
                                 Rule::struct_def => {
-                                    found_struct = Some(child);
+                                    structs.push(self.parser.parse_struct_def(child)?);
                                     break;
                                 }
                                 _ => {}
                             }
                         }
-
-                        if let Some(enum_pair) = found_enum {
-                            let enum_def = self.parser.parse_enum_def(enum_pair)?;
-                            enums.push(enum_def);
-                        } else if let Some(struct_pair) = found_struct {
-                            let struct_def = self.parser.parse_struct_def(struct_pair)?;
-                            structs.push(struct_def);
-                        }
                     }
+
                     _ => {}
                 }
             }
