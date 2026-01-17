@@ -23,3 +23,17 @@ pub struct FieldInit {
     pub name: String,
     pub value: Expr,
 }
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct EnumVariant {
+    pub name: String,
+    pub parent: String,
+    pub args: Vec<Field>,
+    pub default: Option<Expr>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct EnumDefinition {
+    pub name: String,
+    pub variants: Vec<EnumVariant>,
+}

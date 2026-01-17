@@ -1,6 +1,15 @@
-use super::type_ast::{Field, StructDefinition};
+use super::type_ast::{EnumDefinition, EnumVariant, Field, StructDefinition};
 use super::types::TypeId;
 use std::collections::HashMap;
+
+/// Stores information about an enum variant for lookup.
+#[derive(Clone, Debug)]
+pub struct EnumVariantInfo {
+    pub enum_name: String,
+    pub variant_name: String,
+    pub arg_types: Vec<TypeId>,
+    pub has_defaults: bool,
+}
 
 /// Symbol table for tracking variable and function types during inference.
 ///
@@ -15,6 +24,12 @@ pub struct SymbolTable {
 
     /// Maps struct names to their definitions.
     structs: HashMap<String, StructDefinition>,
+
+    /// Maps enum names to their definitions.
+    enums: HashMap<String, EnumDefinition>,
+
+    /// Maps qualified variant names ("EnumName.VariantName") to variant info.
+    enum_variants: HashMap<String, EnumVariantInfo>,
 }
 
 impl Default for SymbolTable {
@@ -29,6 +44,8 @@ impl SymbolTable {
             vars: HashMap::new(),
             functions: HashMap::new(),
             structs: HashMap::new(),
+            enums: HashMap::new(),
+            enum_variants: HashMap::new(),
         }
     }
 
@@ -67,5 +84,66 @@ impl SymbolTable {
         self.structs
             .get(struct_name)
             .and_then(|s| s.fields.iter().find(|f| f.name == field_name))
+    }
+
+    /// Define an enum type.
+    pub fn define_enum(&mut self, def: EnumDefinition) {
+        self.enums.insert(def.name.clone(), def);
+    }
+
+    /// Look up an enum definition by name.
+    pub fn lookup_enum(&self, name: &str) -> Option<&EnumDefinition> {
+        self.enums.get(name)
+    }
+
+    /// Define an enum variant constructor.
+    pub fn define_enum_variant(&mut self, variant: &EnumVariant) {
+        let qualified_name = format!("{}.{}", variant.parent, variant.name);
+        let has_defaults = variant.args.iter().any(|f| f.default.is_some());
+        let arg_types: Vec<TypeId> = variant.args.iter().map(|f| f.ty).collect();
+
+        self.enum_variants.insert(
+            qualified_name,
+            EnumVariantInfo {
+                enum_name: variant.parent.clone(),
+                variant_name: variant.name.clone(),
+                arg_types,
+                has_defaults,
+            },
+        );
+    }
+
+    /// Look up an enum variant by qualified name ("EnumName.VariantName").
+    pub fn lookup_enum_variant(&self, qualified_name: &str) -> Option<&EnumVariantInfo> {
+        self.enum_variants.get(qualified_name)
+    }
+
+    /// Look up an enum variant by simple name across all enums.
+    pub fn lookup_enum_variant_by_simple_name(
+        &self,
+        simple_name: &str,
+    ) -> Option<&EnumVariantInfo> {
+        self.enum_variants
+            .values()
+            .find(|v| v.variant_name == simple_name)
+    }
+
+    /// Look up an enum variant by enum name and variant name.
+    pub fn lookup_variant(&self, enum_name: &str, variant_name: &str) -> Option<&EnumVariantInfo> {
+        let qualified_name = format!("{}.{}", enum_name, variant_name);
+        self.enum_variants.get(&qualified_name)
+    }
+
+    /// Get all variant names for an enum.
+    pub fn get_enum_variants(&self, enum_name: &str) -> Vec<&EnumVariantInfo> {
+        self.enum_variants
+            .values()
+            .filter(|v| v.enum_name == enum_name)
+            .collect()
+    }
+
+    /// Get all registered enums.
+    pub fn get_enums(&self) -> Vec<&EnumDefinition> {
+        self.enums.values().collect()
     }
 }

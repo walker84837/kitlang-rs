@@ -11,7 +11,7 @@ use crate::codegen::ast::{Block, Expr, Function, Include, Program, Stmt};
 use crate::codegen::compiler::{CompilerMeta, CompilerOptions, Toolchain};
 use crate::codegen::inference::TypeInferencer;
 use crate::codegen::parser::Parser as CodeParser;
-use crate::codegen::type_ast::StructDefinition;
+use crate::codegen::type_ast::{EnumDefinition, StructDefinition};
 use crate::codegen::types::{ToCRepr, Type};
 
 pub struct Compiler {
@@ -41,6 +41,7 @@ impl Compiler {
         let mut includes = Vec::new();
         let mut functions = Vec::new();
         let mut structs = Vec::new();
+        let mut enums = Vec::new();
 
         // TODO: track which files are UTF-8 formatted:
         // - true = UTF-8
@@ -59,8 +60,30 @@ impl Compiler {
                     Rule::include_stmt => includes.push(self.parser.parse_include(pair)),
                     Rule::function_decl => functions.push(self.parser.parse_function(pair)?),
                     Rule::type_def => {
-                        let struct_def = self.parser.parse_struct_def_from_type_def(pair)?;
-                        structs.push(struct_def);
+                        let mut found_enum = None;
+                        let mut found_struct = None;
+
+                        for child in pair.clone().into_inner() {
+                            match child.as_rule() {
+                                Rule::enum_def => {
+                                    found_enum = Some(child);
+                                    break;
+                                }
+                                Rule::struct_def => {
+                                    found_struct = Some(child);
+                                    break;
+                                }
+                                _ => {}
+                            }
+                        }
+
+                        if let Some(enum_pair) = found_enum {
+                            let enum_def = self.parser.parse_enum_def(enum_pair)?;
+                            enums.push(enum_def);
+                        } else if let Some(struct_pair) = found_struct {
+                            let struct_def = self.parser.parse_struct_def(struct_pair)?;
+                            structs.push(struct_def);
+                        }
                     }
                     _ => {}
                 }
@@ -74,6 +97,7 @@ impl Compiler {
             imports: HashSet::new(),
             functions,
             structs,
+            enums,
         })
     }
 
@@ -114,6 +138,12 @@ impl Compiler {
         // Emit struct declarations first
         for struct_def in &prog.structs {
             out.push_str(&self.generate_struct_declaration(struct_def, &prog.structs));
+            out.push('\n');
+        }
+
+        // Emit enum declarations
+        for enum_def in &prog.enums {
+            out.push_str(&self.generate_enum_declaration(enum_def));
             out.push('\n');
         }
 
@@ -211,6 +241,141 @@ impl Compiler {
             struct_def.name,
             field_decls.join("\n")
         )
+    }
+
+    fn generate_enum_declaration(&self, enum_def: &EnumDefinition) -> String {
+        let mut output = String::new();
+
+        // Check if all variants are simple (no arguments)
+        let all_simple = enum_def.variants.iter().all(|v| v.args.is_empty());
+
+        if all_simple {
+            // Simple enum: generate C enum
+            let variants: Vec<String> = enum_def
+                .variants
+                .iter()
+                .map(|v| format!("    {}_{}", enum_def.name, v.name))
+                .collect();
+
+            output.push_str(&format!(
+                "typedef enum {{\n{}\n}} {};\n\n",
+                variants.join(",\n"),
+                enum_def.name
+            ));
+        } else {
+            // Complex enum: generate C enum for discriminant
+            let discriminant_variants: Vec<String> = enum_def
+                .variants
+                .iter()
+                .map(|v| format!("    {}_{}", enum_def.name, v.name))
+                .collect();
+
+            output.push_str(&format!(
+                "typedef enum {{\n{}\n}} {}_Discriminant;\n\n",
+                discriminant_variants.join(",\n"),
+                enum_def.name
+            ));
+
+            // Generate variant data structs
+            for v in enum_def.variants.iter().filter(|v| !v.args.is_empty()) {
+                let field_decls: Vec<String> = v
+                    .args
+                    .iter()
+                    .map(|arg| {
+                        let ty = self
+                            .inferencer
+                            .store
+                            .resolve(arg.ty)
+                            .ok()
+                            .or(arg.annotation.as_ref().cloned())
+                            .unwrap_or(Type::Void);
+                        let c_repr = ty.to_c_repr();
+                        format!("    {} {};", c_repr.name, arg.name)
+                    })
+                    .collect();
+
+                output.push_str(&format!(
+                    "typedef struct {{\n{}\n}} {}_{}_data;\n\n",
+                    field_decls.join("\n"),
+                    enum_def.name,
+                    v.name
+                ));
+            }
+
+            // Generate union of variant data
+            let union_fields: Vec<String> = enum_def
+                .variants
+                .iter()
+                .filter(|v| !v.args.is_empty())
+                .map(|v| {
+                    format!(
+                        "    {}_{}_data {};",
+                        enum_def.name,
+                        v.name,
+                        v.name.to_lowercase()
+                    )
+                })
+                .collect();
+
+            let struct_body = format!(
+                "    {}_Discriminant _discriminant;\n    union {{\n{}\n    }} _variant;",
+                enum_def.name,
+                union_fields.join("\n")
+            );
+
+            output.push_str(&format!(
+                "typedef struct {{\n{}\n}} {};\n\n",
+                struct_body, enum_def.name
+            ));
+        }
+
+        // Generate constructor functions for variants with arguments
+        for v in enum_def.variants.iter().filter(|v| !v.args.is_empty()) {
+            let params: Vec<String> = v
+                .args
+                .iter()
+                .map(|arg| {
+                    let ty = self
+                        .inferencer
+                        .store
+                        .resolve(arg.ty)
+                        .ok()
+                        .or(arg.annotation.as_ref().cloned())
+                        .unwrap_or(Type::Void);
+                    let c_repr = ty.to_c_repr();
+                    format!("{} {}", c_repr.name, arg.name)
+                })
+                .collect();
+
+            let _arg_names: Vec<String> = v.args.iter().map(|arg| arg.name.clone()).collect();
+
+            let assignments: Vec<String> = v
+                .args
+                .iter()
+                .map(|arg| {
+                    format!(
+                        "    result._variant.{}.{} = {};",
+                        v.name.to_lowercase(),
+                        arg.name,
+                        arg.name
+                    )
+                })
+                .collect();
+
+            output.push_str(&format!(
+                "{} {}_{}_new({}) {{\n    {} result;\n    result._discriminant = {}_{};\n{}\n    return result;\n}}\n\n",
+                enum_def.name,
+                enum_def.name,
+                v.name,
+                params.join(", "),
+                enum_def.name,
+                enum_def.name,
+                v.name,
+                assignments.join("\n")
+            ));
+        }
+
+        output
     }
 
     fn transpile_function(&self, func: &Function) -> String {
@@ -362,12 +527,29 @@ impl Compiler {
                 args,
                 ty: _,
             } => {
-                let args_str = args
-                    .iter()
-                    .map(|a| self.transpile_expr(a))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                format!("{callee}({args_str})")
+                // Check if this is an enum variant constructor call (by simple name)
+                if let Some(variant_info) = self
+                    .inferencer
+                    .symbols()
+                    .lookup_enum_variant_by_simple_name(callee)
+                {
+                    let args_str = args
+                        .iter()
+                        .map(|a| self.transpile_expr(a))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    format!(
+                        "{}_{}_new({})",
+                        variant_info.enum_name, variant_info.variant_name, args_str
+                    )
+                } else {
+                    let args_str = args
+                        .iter()
+                        .map(|a| self.transpile_expr(a))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    format!("{callee}({args_str})")
+                }
             }
             Expr::UnaryOp { op, expr, ty: _ } => {
                 let expr_str = self.transpile_expr(expr);
@@ -449,6 +631,62 @@ impl Compiler {
             } => {
                 let expr_str = self.transpile_expr(expr);
                 format!("{}.{}", expr_str, field_name)
+            }
+            Expr::EnumVariant {
+                enum_name,
+                variant_name,
+                ty: _,
+            } => {
+                // Simple enum variant - check if it's a simple or complex enum
+                let enum_def = self.inferencer.symbols().lookup_enum(enum_name);
+                let is_simple = enum_def
+                    .map(|e| e.variants.iter().all(|v| v.args.is_empty()))
+                    .unwrap_or(false);
+
+                if is_simple {
+                    // Simple enum: just use the discriminant constant
+                    format!("{}_{}", enum_name, variant_name)
+                } else {
+                    // Complex enum: need full struct initialization
+                    format!(
+                        "{{.{} = {}_{}, ._variant = {{0}}}}",
+                        "_discriminant", enum_name, variant_name
+                    )
+                }
+            }
+            Expr::EnumInit {
+                enum_name,
+                variant_name,
+                args,
+                ty: _,
+            } => {
+                // Check if this is a simple variant (no args)
+                if args.is_empty() {
+                    // Simple variant - need to create a full struct initialization for complex enums
+                    // For simple enums: just use the discriminant constant
+                    let enum_def = self.inferencer.symbols().lookup_enum(enum_name);
+                    let is_simple = enum_def
+                        .map(|e| e.variants.iter().all(|v| v.args.is_empty()))
+                        .unwrap_or(false);
+
+                    if is_simple {
+                        format!("{}_{}", enum_name, variant_name)
+                    } else {
+                        // Complex enum: initialize the full struct with designated initializers
+                        format!(
+                            "{{.{} = {}_{}, ._variant = {{0}}}}",
+                            "_discriminant", enum_name, variant_name
+                        )
+                    }
+                } else {
+                    // Complex variant - call the constructor
+                    let args_str = args
+                        .iter()
+                        .map(|a| self.transpile_expr(a))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    format!("{}_{}_new({})", enum_name, variant_name, args_str)
+                }
             }
         }
     }
