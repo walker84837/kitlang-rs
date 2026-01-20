@@ -1,5 +1,8 @@
+use std::collections::HashSet;
+
+use super::Field;
 use super::ast::{Block, Expr, Function, Literal, Program, Stmt};
-use super::symbols::SymbolTable;
+use super::symbols::{EnumVariantInfo, SymbolTable};
 use super::type_ast::{EnumDefinition, FieldInit, StructDefinition};
 use super::types::{BinaryOperator, Type, TypeId, TypeStore, UnaryOperator};
 use crate::error::{CompilationError, CompileResult};
@@ -69,7 +72,7 @@ impl TypeInferencer {
                 } else {
                     self.store.new_unknown()
                 };
-                updated_fields.push(super::type_ast::Field {
+                updated_fields.push(Field {
                     name: field.name.clone(),
                     ty: field_type_id,
                     annotation: field.annotation.clone(),
@@ -79,7 +82,7 @@ impl TypeInferencer {
             }
 
             // Create updated struct definition with resolved field types
-            let updated_struct_def = super::type_ast::StructDefinition {
+            let updated_struct_def = StructDefinition {
                 name: struct_def.name.clone(),
                 fields: updated_fields,
             };
@@ -552,7 +555,7 @@ impl TypeInferencer {
                 };
 
                 // Build set of provided field names for validation
-                let provided_field_names: std::collections::HashSet<String> =
+                let provided_field_names: HashSet<String> =
                     fields.iter().map(|f| f.name.clone()).collect();
 
                 // Validate all provided fields exist in struct
@@ -578,7 +581,7 @@ impl TypeInferencer {
                 }
 
                 // Collect field info we need (release struct_def borrow afterwards)
-                let field_infos: Vec<(String, Option<Type>, Option<super::ast::Expr>)> = struct_def
+                let field_infos: Vec<(String, Option<Type>, Option<Expr>)> = struct_def
                     .fields
                     .iter()
                     .map(|f| (f.name.clone(), f.annotation.clone(), f.default.clone()))
@@ -634,7 +637,7 @@ impl TypeInferencer {
             } => {
                 let container_ty = self.infer_expr(expr)?;
 
-                // Resolve container type - handle both Struct and Named types
+                // Resolve container type, handle both Struct and Named types
                 let resolved = self.store.resolve(container_ty)?;
 
                 // For Named types, we need to look up the struct or enum definition
@@ -787,8 +790,8 @@ impl TypeInferencer {
     /// Follows the Haskell compiler's `addDefaultArgs` function.
     fn resolve_default_args(
         &self,
-        variant_info: &super::symbols::EnumVariantInfo,
-        enum_def: &super::type_ast::EnumDefinition,
+        variant_info: &EnumVariantInfo,
+        enum_def: &EnumDefinition,
         provided_args: &[Expr],
     ) -> CompileResult<Vec<Expr>> {
         let total_required = variant_info.arg_types.len();
@@ -806,21 +809,15 @@ impl TypeInferencer {
                     ))
                 })?;
 
+            let provided_len = result.len();
             for i in (0..total_required).rev() {
-                if i >= result.len() {
-                    if let Some(default_expr) = variant.args.get(i).and_then(|f| f.default.as_ref())
-                    {
-                        result.push(default_expr.clone());
-                    } else {
-                        return Err(CompilationError::TypeError(format!(
-                            "Missing required argument {} for variant '{}' (no default value)",
-                            i, variant_info.variant_name
-                        )));
-                    }
+                if i >= provided_len
+                    && let Some(default_expr) = variant.args.get(i).and_then(|f| f.default.as_ref())
+                {
+                    result.push(default_expr.clone());
                 }
             }
         }
-
         Ok(result)
     }
 

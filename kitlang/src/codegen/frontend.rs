@@ -243,6 +243,17 @@ impl Compiler {
         )
     }
 
+    /// Lowers a Kit enum definition into its C representation.
+    ///
+    /// Simple enums (variants without associated data) are emitted as plain C `enum`s.
+    /// Enums with data-carrying variants are compiled into a tagged-union layout:
+    /// - a discriminant `enum` to track the active variant,
+    /// - one `struct` per data-carrying variant,
+    /// - a top-level `struct` containing the discriminant and a `union` of variant data.
+    ///
+    /// For variants with fields, constructor functions are generated to initialize the
+    /// correct discriminant and populate the union safely, avoiding error-prone manual
+    /// initialization in C.
     fn generate_enum_declaration(&self, enum_def: &EnumDefinition) -> String {
         let mut output = String::new();
 
@@ -347,17 +358,18 @@ impl Compiler {
                 })
                 .collect();
 
-            let _arg_names: Vec<String> = v.args.iter().map(|arg| arg.name.clone()).collect();
+            let arg_names: Vec<String> = v.args.iter().map(|arg| arg.name.clone()).collect();
 
             let assignments: Vec<String> = v
                 .args
                 .iter()
-                .map(|arg| {
+                .enumerate()
+                .map(|(i, arg)| {
                     format!(
                         "    result._variant.{}.{} = {};",
                         v.name.to_lowercase(),
                         arg.name,
-                        arg.name
+                        arg_names[i]
                     )
                 })
                 .collect();
@@ -679,12 +691,30 @@ impl Compiler {
                         )
                     }
                 } else {
-                    // Complex variant - call the constructor
-                    let args_str = args
-                        .iter()
-                        .map(|a| self.transpile_expr(a))
-                        .collect::<Vec<_>>()
-                        .join(", ");
+                    // Complex variant - call the constructor with defaults inlined
+                    let enum_def = self.inferencer.symbols().lookup_enum(enum_name);
+                    let variant_def =
+                        enum_def.and_then(|e| e.variants.iter().find(|v| v.name == *variant_name));
+
+                    let args_str = if let Some(variant) = variant_def {
+                        let mut full_args = args.clone();
+                        for i in args.len()..variant.args.len() {
+                            if let Some(default) = &variant.args[i].default {
+                                full_args.push(default.clone());
+                            }
+                        }
+                        full_args
+                            .iter()
+                            .map(|a| self.transpile_expr(a))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    } else {
+                        args.iter()
+                            .map(|a| self.transpile_expr(a))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    };
+
                     format!("{}_{}_new({})", enum_name, variant_name, args_str)
                 }
             }

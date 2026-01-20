@@ -1,0 +1,19 @@
+include "stdio.h";
+
+enum TestEnum {
+    NoArgs;
+    WithDefault(a: Int, b: Int = 100);
+    WithTwoDefaults(x: Float, y: Float = 2.5, z: Int = 42);
+}
+
+function main() {
+    // Test partial instantiation
+    var e1 = WithDefault(10);  // Should use b=100
+    var e2 = WithTwoDefaults(1.5);  // Should use y=2.5, z=42
+    var e3 = WithTwoDefaults(1.5, 3.0);  // Should use z=42
+
+    printf("Partial constructors work!\n");
+    printf("e1.a = %i, e1.b = %i\n", 10, 100);
+    printf("e2.x = %f, e2.y = %f, e2.z = %i\n", 1.5, 2.5, 42);
+    printf("e3.x = %f, e3.y = %f, e3.z = %i\n", 1.5, 3.0, 42);
+}
