@@ -5,7 +5,7 @@ use crate::error::CompilationError;
 use crate::{Rule, parse_error};
 
 use super::ast::{Block, Expr, Function, Include, Literal, Param, Stmt};
-use super::type_ast::{Field, FieldInit, StructDefinition};
+use super::type_ast::{EnumDefinition, EnumVariant, Field, FieldInit, StructDefinition};
 use super::types::{AssignmentOperator, Type, TypeId};
 use crate::error::CompileResult;
 
@@ -151,6 +151,97 @@ impl Parser {
         self.parse_struct_def(struct_def_pair)
     }
 
+    pub fn parse_enum_def(&self, pair: Pair<Rule>) -> CompileResult<EnumDefinition> {
+        let mut inner = pair.into_inner();
+
+        let name = inner
+            .next()
+            .filter(|p| p.as_rule() == Rule::identifier)
+            .ok_or(parse_error!("enum definition missing name"))?
+            .as_str()
+            .to_string();
+
+        while let Some(peek) = inner.peek() {
+            if peek.as_rule() == Rule::type_params {
+                let _ = inner.next();
+            } else {
+                break;
+            }
+        }
+
+        let variants: Vec<EnumVariant> = inner
+            .filter(|p| p.as_rule() == Rule::enum_variant)
+            .map(|p| self.parse_enum_variant(p, name.clone()))
+            .collect::<Result<_, _>>()?;
+
+        if variants.is_empty() {
+            log::warn!("Enum '{}' has empty body", name);
+        }
+
+        Ok(EnumDefinition { name, variants })
+    }
+
+    pub fn parse_enum_def_from_type_def(&self, pair: Pair<Rule>) -> CompileResult<EnumDefinition> {
+        let mut found_enum = None;
+        for child in pair.into_inner() {
+            if child.as_rule() == Rule::enum_def {
+                found_enum = Some(child);
+                break;
+            }
+        }
+
+        let enum_def_pair = found_enum.ok_or(parse_error!("type_def does not contain enum_def"))?;
+
+        self.parse_enum_def(enum_def_pair)
+    }
+
+    fn parse_enum_variant(
+        &self,
+        pair: Pair<Rule>,
+        parent_name: String,
+    ) -> CompileResult<EnumVariant> {
+        let mut identifier_found = None;
+        let mut args = Vec::new();
+        let mut variant_default = None;
+
+        for child in pair.clone().into_inner() {
+            match child.as_rule() {
+                Rule::identifier => {
+                    identifier_found = Some(child.as_str().to_string());
+                }
+                Rule::param => {
+                    let field = self.parse_param_field(child)?;
+                    args.push(field);
+                }
+                Rule::expr => {
+                    variant_default = Some(self.parse_expr(child)?);
+                }
+                Rule::metadata_and_modifiers => {
+                    // Skip - we already checked this
+                }
+                other => {
+                    log::debug!("Unknown rule in enum_variant: {:?}", other);
+                }
+            }
+        }
+
+        let name = identifier_found.ok_or(parse_error!("enum variant missing name"))?;
+
+        // If there's a variant-level default, apply it to the last argument
+        if let Some(default_expr) = variant_default
+            && let Some(last_arg) = args.last_mut()
+        {
+            last_arg.default = Some(default_expr);
+        }
+
+        Ok(EnumVariant {
+            name,
+            parent: parent_name,
+            args,
+            default: None,
+        })
+    }
+
     fn parse_struct_field(&self, pair: Pair<Rule>) -> CompileResult<Field> {
         // var_decl = { (var_kw | const_kw) ~ identifier ~ (":" ~ type_annotation)? ~ ("=" ~ expr)? ~ ";" }
         let name = Self::extract_first_identifier(pair.clone())
@@ -205,6 +296,28 @@ impl Parser {
                 })
             })
             .collect()
+    }
+
+    fn parse_param_field(&self, pair: Pair<Rule>) -> CompileResult<Field> {
+        // param = { identifier ~ ":" ~ type_annotation ~ ( "=" ~ expr )? }
+        let mut inner = pair.into_inner();
+        let name = inner.next().unwrap().as_str().to_string();
+        let type_node = inner.next().unwrap();
+        let ty_ann = self.parse_type(type_node)?;
+
+        // Check for optional default expression
+        let default = inner
+            .next()
+            .map(|expr_pair| self.parse_expr(expr_pair))
+            .transpose()?;
+
+        Ok(Field {
+            name,
+            ty: TypeId::default(),
+            annotation: Some(ty_ann),
+            is_const: false,
+            default,
+        })
     }
 
     fn parse_block(&self, pair: Pair<Rule>) -> CompileResult<Block> {
@@ -532,7 +645,7 @@ impl Parser {
                 let mut expr = self.parse_expr(inner.next().unwrap())?;
 
                 // Handle chained field access (.field1.field2.field3)
-                while let Some(field_pair) = inner.next() {
+                for field_pair in inner {
                     if field_pair.as_rule() == Rule::postfix_field {
                         let mut field_inner = field_pair.into_inner();
                         let field_name = field_inner

@@ -1,0 +1,5 @@
+Test enum default values:
+d1 y field should be 42, got: 42
+d2 y field should be 20, got: 20
+c1 b field should be hello, got: hello
+c2 b field should be world, got: world
