@@ -1,4 +1,4 @@
-use assert_cmd::{Command as AssertCommand, cargo::*};
+use assert_cmd::{cargo::*, Command as AssertCommand};
 use predicates::prelude::*;
 use std::{path::Path, process::Command, sync::OnceLock};
 
@@ -195,6 +195,21 @@ fn test_enum_basic() -> Result<(), Box<dyn std::error::Error>> {
 #[test]
 fn test_enum_defaults() -> Result<(), Box<dyn std::error::Error>> {
     run_example_test("enum_defaults", None)
+}
+
+#[test]
+fn test_globals_basic() -> Result<(), Box<dyn std::error::Error>> {
+    run_example_test("globals_basic", None)
+}
+
+#[test]
+fn test_globals_comprehensive() -> Result<(), Box<dyn std::error::Error>> {
+    run_example_test("globals_comprehensive", None)
+}
+
+#[test]
+fn test_globals_test() -> Result<(), Box<dyn std::error::Error>> {
+    run_example_test("globals_test", None)
 }
 
 #[test]
