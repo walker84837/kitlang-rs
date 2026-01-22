@@ -1,4 +1,4 @@
-use assert_cmd::{cargo::*, Command as AssertCommand};
+use assert_cmd::{Command as AssertCommand, cargo::*};
 use predicates::prelude::*;
 use std::{path::Path, process::Command, sync::OnceLock};
 
