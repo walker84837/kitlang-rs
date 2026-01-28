@@ -198,6 +198,21 @@ fn test_enum_defaults() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test]
+fn test_globals_basic() -> Result<(), Box<dyn std::error::Error>> {
+    run_example_test("globals_basic", None)
+}
+
+#[test]
+fn test_globals_comprehensive() -> Result<(), Box<dyn std::error::Error>> {
+    run_example_test("globals_comprehensive", None)
+}
+
+#[test]
+fn test_globals_test() -> Result<(), Box<dyn std::error::Error>> {
+    run_example_test("globals_test", None)
+}
+
+#[test]
 fn test_nested_comments() -> Result<(), Box<dyn std::error::Error>> {
     let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
