@@ -1,4 +1,4 @@
-use assert_cmd::{Command as AssertCommand, cargo::*};
+use assert_cmd::{cargo::*, Command as AssertCommand};
 use predicates::prelude::*;
 use std::{path::Path, process::Command, sync::OnceLock};
 
@@ -8,6 +8,10 @@ fn setup_logging() {
     LOGGER_INIT.get_or_init(|| {
         env_logger::builder().is_test(true).init();
     });
+}
+
+fn normalize_line_endings(s: &str) -> String {
+    s.replace("\r\n", "\n").replace("\r", "\n")
 }
 
 const MANIFEST_DIR: &str = env!("CARGO_MANIFEST_DIR");
@@ -68,11 +72,12 @@ fn run_example_test(
     let expected_output_path = workspace_root.join(expected_file);
     log::info!("Expected output: {}", expected_output_path.display());
     let expected_output = std::fs::read_to_string(expected_output_path)?;
+    let expected_normalized = normalize_line_endings(&expected_output);
 
     // Assert the output
     compiled_cmd
         .assert()
-        .stdout(predicate::eq(expected_output.as_str()))
+        .stdout(predicate::eq(expected_normalized.as_str()))
         .success();
 
     // TODO: executable files are actually generated in the CWD, not in the examples folder.
